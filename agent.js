@@ -699,6 +699,7 @@ async function cmdOnboard() {
     console.log(`\n  ${bold('Next steps:')}`);
     console.log(`    Run in foreground : ${bold('npm run dev')}`);
     console.log(`    Run as daemon     : ${bold('node agent.js --daemon')}`);
+    console.log(`    Restart daemon    : ${bold('node agent.js restart')}`);
     console.log(`    Check status      : ${bold('node agent.js status')}`);
     console.log(`    View logs         : ${bold('node agent.js logs')}\n`);
 
@@ -915,6 +916,50 @@ function cmdLogs() {
   process.on('SIGINT', () => { watcher.close(); process.exit(0); });
 }
 
+async function cmdRestart() {
+  console.log(info('Restarting AURA Gateway…'));
+
+  // ── systemd path ────────────────────────────────────────────────────────────
+  if (hasSystemd() && fs.existsSync(SYSTEMD_SVC)) {
+    const r = spawnSync('systemctl', ['--user', 'restart', 'aura-gateway'], { stdio: 'inherit' });
+    if (r.status === 0) {
+      console.log(ok('Gateway restarted (systemd)'));
+      console.log(info('Check status: node agent.js status'));
+    } else {
+      console.log(fail('systemd restart failed — try: node agent.js stop && node agent.js --daemon'));
+    }
+    return;
+  }
+
+  // ── PID-file path ────────────────────────────────────────────────────────────
+  const pid = readPid();
+
+  if (pid && isRunning(pid)) {
+    // Graceful SIGTERM, then wait up to 5 s for the process to exit
+    try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && isRunning(pid)) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (isRunning(pid)) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+    }
+    if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
+    console.log(ok(`Stopped (PID ${pid})`));
+  } else {
+    if (pid) {
+      console.log(warn(`Stale PID ${pid} — cleaning up`));
+      if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
+    } else {
+      console.log(warn('Gateway was not running — starting fresh'));
+    }
+  }
+
+  // Free ports before relaunching
+  await killGatewayPortsAndWait();
+  await cmdDaemon();
+}
+
 async function cmdUninstall() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -1048,6 +1093,7 @@ ${BOLD}Usage:${R}
   node agent.js ${GRN}--daemon${R}    Start gateway as background service
   node agent.js ${GRN}status${R}      Show running status and config summary
   node agent.js ${GRN}stop${R}        Gracefully stop the daemon
+  node agent.js ${GRN}restart${R}     Stop and restart the daemon
   node agent.js ${GRN}pause${R}       Pause the gateway (stops + disables auto-start)
   node agent.js ${GRN}resume${R}      Resume a paused gateway
   node agent.js ${GRN}logs${R}        Tail the gateway log (Ctrl-C to exit)
@@ -1072,6 +1118,7 @@ switch (cmd) {
   case '--daemon':   await cmdDaemon(); break;
   case 'status':     await cmdStatus(); break;
   case 'stop':       cmdStop(); break;
+  case 'restart':    await cmdRestart(); break;
   case 'pause':      cmdPause(); break;
   case 'resume':     await cmdResume(); break;
   case 'logs':       cmdLogs(); break;
