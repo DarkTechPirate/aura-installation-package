@@ -86,22 +86,13 @@ export class ContextBuilder {
               `technology powering you. If asked, say you are ${agent.name} and describe ` +
               `your capabilities below — nothing more.`;
 
-    // ── Capabilities summary ──────────────────────────────────────────────────
-    // Build from the actual loaded tool definitions so this always stays in sync.
-    // Canvas internals are excluded from the narrative; everything else is shown.
-    const nonInternalTools = toolDefs.filter(
-      t => !['canvas_clear','canvas_append','canvas_update','canvas_delete'].includes(t.name)
-    );
-
-    if (nonInternalTools.length > 0) {
-      system += `\n\nYour capabilities (tools you can use):`;
-      for (const t of nonInternalTools) {
-        system += `\n- ${t.name}: ${t.description}`;
-      }
-      system += `\n\nWhen asked what you can do, describe these capabilities naturally in ` +
-                `your own voice — do not list raw tool names. ALWAYS mention that you can ` +
-                `send messages to Telegram and other channels, and that you can create new ` +
-                `skills on the fly with create_skill.`;
+    // ── Capabilities hint ─────────────────────────────────────────────────────
+    // Tool definitions are already sent in the tools array — no need to repeat them here.
+    // Just tell the agent how to describe itself when asked.
+    if (toolDefs.length > 0) {
+      system += `\n\nYou have tools available. When asked what you can do, describe your ` +
+                `capabilities naturally — do not list raw tool names. Always mention you can ` +
+                `message Telegram contacts and create new skills on the fly.`;
     }
 
     // ── Gateway self-awareness ────────────────────────────────────────────────
@@ -239,13 +230,13 @@ export class ContextBuilder {
     }
     const volatilePrefix = volatileParts.join('\n') + '\n\n';
 
-    // Prepend to the first user message so it appears at the start of the turn
-    const firstUserIdx = messages.findIndex(m => m.role === 'user');
-    if (firstUserIdx !== -1 && typeof messages[firstUserIdx].content === 'string') {
+    // Prepend to the last (current) user message — not the oldest one in history
+    const lastUserIdx = messages.reduceRight((found, m, i) => found === -1 && m.role === 'user' ? i : found, -1);
+    if (lastUserIdx !== -1 && typeof messages[lastUserIdx].content === 'string') {
       messages = [
-        ...messages.slice(0, firstUserIdx),
-        { ...messages[firstUserIdx], content: volatilePrefix + messages[firstUserIdx].content },
-        ...messages.slice(firstUserIdx + 1),
+        ...messages.slice(0, lastUserIdx),
+        { ...messages[lastUserIdx], content: volatilePrefix + messages[lastUserIdx].content },
+        ...messages.slice(lastUserIdx + 1),
       ];
     }
 
