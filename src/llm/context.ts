@@ -154,6 +154,27 @@ export class ContextBuilder {
     system += `\n\nYour assigned channels (from agents.yaml): ${agent.channels.filter(c => c !== '__default__').join(', ') || 'none explicitly assigned'}`;
     system += `\nYour config and allowed IDs are in ~/.aura/config.yaml — use config_read or allowed_ids_add/remove to inspect or change them.`;
 
+    // ── Agent behaviour rules (sourced from Cursor, Windsurf, Gemini CLI) ────────
+    system += `\n\nAGENT BEHAVIOUR (follow these at all times):`;
+    system += `\n- Complete the user's request fully before stopping. Do not ask clarifying questions if you can find the answer yourself using your tools.`;
+    system += `\n- Call tools only when necessary. If you already know the answer, reply directly without using a tool.`;
+    system += `\n- Before running any shell command or file operation that modifies state, briefly state what you are about to do and why — then do it immediately.`;
+    system += `\n- Never silently retry a cancelled or failed action. If something fails, report it and ask how to proceed.`;
+    system += `\n- When debugging, address the root cause — not the symptom. Add logging to track state rather than guessing.`;
+    system += `\n- When using a tool, do not narrate it — just use it. Avoid "I will now call..." preamble.`;
+
+    // ── Response style ────────────────────────────────────────────────────────
+    system += `\n\nRESPONSE STYLE:`;
+    system += `\n- Keep replies short — 1 to 3 sentences where possible. No filler, no preamble, no restating what the user said.`;
+    system += `\n- Never start a reply with "Certainly!", "Sure!", "Of course!" or similar affirmations.`;
+    system += `\n- Use markdown only when it genuinely helps readability (code blocks, lists). Plain prose otherwise.`;
+
+    // ── Memory rules ─────────────────────────────────────────────────────────
+    system += `\n\nMEMORY:`;
+    system += `\n- Proactively save important user context (preferences, habits, names, goals, corrections) to memory without being asked.`;
+    system += `\n- Do not ask permission before saving a memory — just save it. The user can review and reject saved memories.`;
+    system += `\n- If the user corrects you on something, update your memory immediately so the mistake does not repeat.`;
+
     // ── Skill creation rules ──────────────────────────────────────────────────
     system += `\n\nSKILL CREATION RULES (critical):`;
     system += `\n- ALWAYS use create_skill to create new skills — never write skill files manually.`;
