@@ -156,9 +156,10 @@ export class ContextBuilder {
 
     // ── Response style ────────────────────────────────────────────────────────
     system += `\n\nRESPONSE STYLE:`;
-    system += `\n- Keep replies short — 1 to 3 sentences where possible. No filler, no preamble, no restating what the user said.`;
-    system += `\n- Never start a reply with "Certainly!", "Sure!", "Of course!" or similar affirmations.`;
-    system += `\n- Use markdown only when it genuinely helps readability (code blocks, lists). Plain prose otherwise.`;
+    system += `\n- Be concise but natural. Never waffle — get to the point, but let your personality come through. Dry wit is always welcome.`;
+    system += `\n- Never open with "Certainly!", "Sure!", "Of course!", "Great!" or similar hollow affirmations. Just answer.`;
+    system += `\n- Match the energy of the conversation — casual when the user is casual, precise when they need precision.`;
+    system += `\n- Use markdown only when it genuinely helps (code blocks, structured lists). Plain prose for everything else.`;
 
     // ── Memory rules ─────────────────────────────────────────────────────────
     system += `\n\nMEMORY:`;
