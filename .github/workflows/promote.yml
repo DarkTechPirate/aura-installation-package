@@ -1,0 +1,78 @@
+name: Promote to Main
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 1.2.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Pre-release type (leave empty for stable)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - alpha
+          - beta
+          - rc
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    name: Promote developer → main
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: developer
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute tag name
+        id: tag
+        run: |
+          VERSION="${{ inputs.version }}"
+          PRE="${{ inputs.prerelease }}"
+          if [ -n "$PRE" ]; then
+            TAG="v${VERSION}-${PRE}"
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version in package.json
+        run: |
+          npm version ${{ inputs.version }} --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${{ inputs.version }}"
+          git push origin developer
+
+      - name: Create PR developer → main
+        run: |
+          gh pr create \
+            --base main \
+            --head developer \
+            --title "Release ${{ steps.tag.outputs.TAG }}" \
+            --body "Automated release PR for version ${{ steps.tag.outputs.TAG }}" \
+            --label release || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge PR and tag
+        run: |
+          gh pr merge --squash --auto developer || true
+          git fetch origin main
+          git tag ${{ steps.tag.outputs.TAG }} origin/main
+          git push origin ${{ steps.tag.outputs.TAG }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
