@@ -40,7 +40,7 @@ function lookupSender(nodeId: string): { name: string; notes?: string } | null {
   return null;
 }
 
-const MAX_MESSAGES = 10;
+const MAX_MESSAGES = 12;
 
 export interface ContextBuildParams {
   event:        ANPEvent;
