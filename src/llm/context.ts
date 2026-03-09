@@ -174,20 +174,26 @@ export class ContextBuilder {
     system += `\n- The workspace (~/.aura/workspace/) is for user data only — not for skill drafts or code.`;
 
     // ── Unloaded skills catalogue ─────────────────────────────────────────────
-    // Names only — descriptions are already in each skill's YAML and would waste tokens.
-    // Cap at 5 so this never grows unbounded as more skills are installed.
-    if (unloadedSkillNames && unloadedSkillNames.length > 0) {
-      const names = unloadedSkillNames.slice(0, 5).join(', ');
-      system += `\n\nOther installed skills (not active this turn): ${names}`;
+    // Skills you have but aren't loaded this turn — you're aware of them but
+    // can't call their tools until the user's next message triggers them.
+    if (unloadedSkillNames && unloadedSkillNames.length > 0 && installedSkills) {
+      const unloadedDefs = installedSkills.filter(s => unloadedSkillNames.includes(s.name));
+      if (unloadedDefs.length > 0) {
+        system += `\n\nYour other installed skills (available but not active this turn — mention them if relevant):`;
+        for (const s of unloadedDefs) {
+          const desc = s.description.replace(/\n/g, ' ').slice(0, 120);
+          system += `\n- ${s.name}: ${desc}`;
+        }
+      }
     }
 
     // ── Long-term profiles ────────────────────────────────────────────────────
     // What the agent knows about the user and about itself, learned over time.
     if (userProfile.trim()) {
-      system += `\n\n## What I know about the user\n${userProfile.slice(0, 1000)}`;
+      system += `\n\n## What I know about the user\n${userProfile.slice(0, 3000)}`;
     }
     if (selfKnowledge.trim()) {
-      system += `\n\n## What I know about myself\n${selfKnowledge.slice(0, 800)}`;
+      system += `\n\n## What I know about myself\n${selfKnowledge.slice(0, 2000)}`;
       system += `\n\nIMPORTANT: The tool list above is the authoritative source of your capabilities. ` +
                 `If any self-knowledge entry contradicts an available tool, the tool list wins. ` +
                 `Never refuse to use a tool that is present in your tool list based on a memory entry.`;
