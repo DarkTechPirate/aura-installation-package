@@ -13,13 +13,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-
+      - name: Install system dependencies
+        run: |
+               sudo apt-get update
+               sudo apt-get install -y libavahi-compat-libdnssd-dev build-essential python3
       - name: Install dependencies
         run: npm ci
 
