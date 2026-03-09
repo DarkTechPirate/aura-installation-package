@@ -1,0 +1,41 @@
+name: google_calendar
+version: 1.0.0
+description: Read and manage Google Calendar events
+executor: google_calendar.ts
+enabled: true
+source: human
+requires_env: [GOOGLE_OAUTH_CREDENTIALS]
+tools:
+  - name: calendar_list_events
+    description: List upcoming calendar events
+    parameters:
+      type: object
+      properties:
+        days: { type: number, description: "Days ahead to look (default 7)" }
+        calendar_id: { type: string, description: "Calendar ID (default: primary)" }
+  - name: calendar_create_event
+    description: Create a calendar event
+    parameters:
+      type: object
+      properties:
+        title: { type: string, description: Event title }
+        start_iso: { type: string, description: Start time ISO 8601 }
+        end_iso: { type: string, description: End time ISO 8601 }
+        description: { type: string, description: Optional description }
+        location: { type: string, description: Optional location }
+      required: [title, start_iso, end_iso]
+  - name: calendar_update_event
+    description: Update a calendar event
+    parameters:
+      type: object
+      properties:
+        event_id: { type: string, description: Event ID }
+        updates: { type: object, description: Fields to update }
+      required: [event_id, updates]
+  - name: calendar_delete_event
+    description: Delete a calendar event
+    parameters:
+      type: object
+      properties:
+        event_id: { type: string, description: Event ID }
+      required: [event_id]

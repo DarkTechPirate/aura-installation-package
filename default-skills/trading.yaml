@@ -1,0 +1,166 @@
+name: trading
+version: 1.1.0
+description: >
+  US STOCKS and CRYPTO trading via Alpaca Markets. DO NOT use for gold, silver, or forex —
+  use the forex skill for those. Includes RSI/MACD/EMA/BB analysis, news sentiment check
+  before every trade, 2-min market boundary guard, 2% risk per trade, 5% daily loss halt.
+  Defaults to paper trading — set ALPACA_PAPER=false for live.
+  SETUP: Before first use, check env_list for ALPACA_API_KEY and ALPACA_API_SECRET.
+  If NOT SET, ask the user for their Alpaca API key and secret, then use env_set to save them.
+  Keys are free at alpaca.markets — paper trading account.
+executor: trading.ts
+enabled: true
+source: human
+requires_env: [ALPACA_API_KEY, ALPACA_API_SECRET]
+tools:
+  - name: get_quote
+    description: >
+      Get the current bid/ask/price for a US stock or crypto symbol (Alpaca).
+      For gold (XAU_USD), silver (XAG_USD), or any forex pair use forex_quote instead.
+    parameters:
+      type: object
+      properties:
+        symbol: { type: string, description: "US stock or crypto ticker (e.g. AAPL, TSLA, SPY, BTC/USD)" }
+      required: [symbol]
+
+  - name: get_bars
+    description: >
+      Get historical OHLCV candlestick bars for a US stock or crypto symbol (Alpaca).
+      For gold, silver, or forex candles use forex_analysis instead.
+    parameters:
+      type: object
+      properties:
+        symbol:    { type: string, description: "US stock or crypto ticker" }
+        timeframe: { type: string, description: "Bar timeframe: 1Min, 5Min, 15Min, 1Hour, 1Day (default: 1Day)" }
+        limit:     { type: number, description: "Number of bars (default: 60, max: 1000)" }
+      required: [symbol]
+
+  - name: get_news
+    description: Get recent news headlines and summaries for a US stock symbol (Alpaca news feed).
+    parameters:
+      type: object
+      properties:
+        symbol: { type: string, description: "US stock ticker" }
+        limit:  { type: number, description: "Number of articles (default: 5)" }
+      required: [symbol]
+
+  - name: technical_analysis
+    description: >
+      Full technical analysis for a US stock or crypto symbol — RSI, MACD, EMA20/50,
+      Bollinger Bands, volume ratio, trend, composite score (0-100), buy/sell/hold signal.
+      Always run before placing a stock trade. For gold/silver/forex use forex_analysis.
+    parameters:
+      type: object
+      properties:
+        symbol: { type: string, description: "US stock or crypto ticker" }
+      required: [symbol]
+
+  - name: get_account
+    description: >
+      Get Alpaca account equity, cash, buying power, and daily P&L.
+      For OANDA (forex/gold) account use forex_account instead.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: get_positions
+    description: >
+      List all open US stock/crypto positions (Alpaca) with entry, current price, and P&L.
+      For gold/silver/forex positions use forex_positions instead.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: get_orders
+    description: >
+      List all pending US stock/crypto orders (Alpaca).
+      For gold/silver/forex pending orders use forex_orders instead.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: place_order
+    description: >
+      Place a buy or sell order for a US stock or crypto (Alpaca). NOT for gold or forex.
+      Automatically: checks news sentiment (blocks on strongly negative buy or positive sell),
+      enforces 2-min market boundary, sizes position to 2% risk, attaches SL and TP.
+      Always run technical_analysis first.
+    parameters:
+      type: object
+      properties:
+        symbol:      { type: string, description: "US stock or crypto ticker" }
+        side:        { type: string, description: "buy or sell" }
+        qty:         { type: number, description: "Shares (auto-calculated from risk if omitted)" }
+        type:        { type: string, description: "market (default), limit, stop, stop_limit" }
+        limit_price: { type: number, description: "Required for limit/stop_limit orders" }
+        stop_loss:   { type: number, description: "Stop-loss price (auto-calculated if omitted)" }
+        take_profit: { type: number, description: "Take-profit price (auto-calculated if omitted)" }
+      required: [symbol, side]
+
+  - name: set_bracket
+    description: >
+      Attach a stop-loss and take-profit bracket to an EXISTING open stock position (Alpaca).
+      Places an OCO order — when one side fills the other cancels automatically.
+      Cancels any previous bracket on the position first.
+      For gold/silver/forex use forex_update_sltp instead.
+    parameters:
+      type: object
+      properties:
+        symbol:      { type: string, description: "US stock ticker with an open position" }
+        stop_loss:   { type: number, description: "Stop-loss price" }
+        take_profit: { type: number, description: "Take-profit price" }
+      required: [symbol, stop_loss, take_profit]
+
+  - name: close_position
+    description: >
+      Close an open US stock/crypto position fully or partially (Alpaca).
+      For gold/silver/forex use forex_close instead.
+    parameters:
+      type: object
+      properties:
+        symbol: { type: string, description: "US stock or crypto ticker" }
+        qty:    { type: number, description: "Shares to close (omit to close entire position)" }
+      required: [symbol]
+
+  - name: cancel_order
+    description: >
+      Cancel a pending US stock/crypto order by order ID (Alpaca).
+      For gold/silver/forex use forex_cancel instead.
+    parameters:
+      type: object
+      properties:
+        order_id: { type: string, description: "Alpaca order ID from get_orders" }
+      required: [order_id]
+
+  - name: trailing_stop
+    description: >
+      Place a trailing stop on an open US stock position to lock in profits (Alpaca).
+      Stop is placed trail_pct% from current price; update by calling again as price moves.
+    parameters:
+      type: object
+      properties:
+        symbol:    { type: string, description: "US stock ticker" }
+        trail_pct: { type: number, description: "Trail distance as percentage (e.g. 2 = 2%)" }
+      required: [symbol, trail_pct]
+
+  - name: scan_watchlist
+    description: >
+      Scan a list of US stocks and rank by technical score. Returns buy/sell/hold signals,
+      RSI, trend, and reasons. For gold/silver/forex scanning use forex_scan instead.
+    parameters:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items: { type: string }
+          description: "US stock tickers to scan (e.g. [AAPL, TSLA, NVDA, SPY])"
+      required: [symbols]
+
+  - name: monitor_positions
+    description: >
+      Review all open US stock positions with live TA signals and P&L alerts (Alpaca).
+      Flags +5% profit (consider TP) and -3% loss (check SL). Run regularly.
+      For gold/silver/forex monitoring use forex_positions + forex_analysis.
+    parameters:
+      type: object
+      properties: {}

@@ -1,0 +1,20 @@
+name: web_search
+version: 1.0.0
+description: Search the web using DuckDuckGo (no API key required)
+executor: web_search.ts
+enabled: true
+source: human
+requires_env: []
+tools:
+  - name: search
+    description: Search the web for information. Use this to look up current events, facts, or any information you don't know.
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: The search query
+        num:
+          type: number
+          description: Number of results to return (default 5)
+      required: [query]

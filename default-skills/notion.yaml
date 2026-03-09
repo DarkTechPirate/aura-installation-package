@@ -1,0 +1,47 @@
+name: notion
+version: 1.0.0
+description: Read and write Notion pages and databases
+executor: notion.ts
+enabled: true
+source: human
+requires_env: [NOTION_API_KEY]
+tools:
+  - name: notion_search
+    description: Search Notion pages and databases
+    parameters:
+      type: object
+      properties:
+        query: { type: string, description: Search query }
+      required: [query]
+  - name: notion_get_page
+    description: Get the content of a Notion page as Markdown
+    parameters:
+      type: object
+      properties:
+        page_id: { type: string, description: Notion page ID }
+      required: [page_id]
+  - name: notion_create_page
+    description: Create a new Notion page
+    parameters:
+      type: object
+      properties:
+        parent_id: { type: string, description: Parent page or database ID }
+        title: { type: string, description: Page title }
+        content: { type: string, description: Page content }
+      required: [parent_id, title, content]
+  - name: notion_append_block
+    description: Append content to a Notion page
+    parameters:
+      type: object
+      properties:
+        page_id: { type: string, description: Page ID }
+        content: { type: string, description: Content to append }
+      required: [page_id, content]
+  - name: notion_query_database
+    description: Query a Notion database
+    parameters:
+      type: object
+      properties:
+        database_id: { type: string, description: Database ID }
+        filter: { type: object, description: Optional Notion filter }
+      required: [database_id]

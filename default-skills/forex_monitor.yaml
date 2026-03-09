@@ -1,0 +1,59 @@
+name: forex_monitor
+version: 1.0.0
+description: >
+  Automated OANDA trade monitoring. Watches all open forex/metals positions during every
+  heartbeat and alerts you on Telegram when trades need attention.
+  Alerts: SL danger zone, breakeven opportunity, near-TP exit signal, large loss.
+  SETUP: Call forex_monitor_start with your Telegram node_id to enable.
+  Requires OANDA_API_TOKEN and OANDA_ACCOUNT_ID to be set.
+executor: forex_monitor.ts
+enabled: true
+source: human
+requires_env: [OANDA_API_TOKEN, OANDA_ACCOUNT_ID]
+tools:
+  - name: forex_monitor_start
+    description: >
+      Enable automated trade monitoring. Gary will check all open OANDA positions on every
+      heartbeat and send Telegram alerts for: SL danger zone, breakeven opportunity,
+      near-TP exit signal, and large loss alerts.
+    parameters:
+      type: object
+      properties:
+        node_id:
+          type: string
+          description: "Your Telegram node_id for alerts (e.g. telegram_6665002430)"
+        danger_pips:
+          type: number
+          description: "Alert when price is within this many pips of stop-loss (default: 15)"
+        breakeven_pct:
+          type: number
+          description: "Suggest moving SL to breakeven when trade is this % of the way to TP (default: 50)"
+        tp_alert_pct:
+          type: number
+          description: "Alert to consider taking profit when trade is this % of the way to TP (default: 80)"
+        loss_alert_pct:
+          type: number
+          description: "Alert when unrealised loss exceeds this % of account balance (default: 1.0)"
+      required: [node_id]
+
+  - name: forex_monitor_stop
+    description: Disable automated trade monitoring. Removes monitoring from the heartbeat.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: forex_monitor_status
+    description: Show current forex monitor configuration — whether it's active and what thresholds are set.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: forex_monitor_check
+    description: >
+      Run an immediate trade monitor check across all open OANDA positions.
+      Returns a list of alerts (danger zone, breakeven, near TP, large loss).
+      Called automatically by the heartbeat when monitoring is active.
+      Also callable manually to check trades on demand.
+    parameters:
+      type: object
+      properties: {}

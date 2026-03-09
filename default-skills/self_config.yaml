@@ -1,0 +1,177 @@
+name: self_config
+version: 2.0.0
+description: >
+  Read and manage the agent's own configuration — channels, allowed IDs, env key status,
+  agent definitions, skill assignments, and environment variables. Agents can add env vars
+  live (no restart needed) and assign new skills to themselves. API key values are never
+  exposed; only whether they are set or not.
+executor: self_config.ts
+enabled: true
+source: human
+requires_env: []
+tools:
+  - name: config_read
+    description: Read the gateway's config.yaml (channels, LLM routing, scheduler, security). API keys and tokens are shown as SET or NOT SET — never their actual values.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: agents_read
+    description: Read the agents.yaml file — shows all agent definitions, their channel assignments, skills, LLM tier, and memory namespace.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: env_list
+    description: List which environment variables are SET or NOT SET. Never shows actual values — only confirms presence.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: env_set
+    description: >
+      Set an environment variable — writes it to the .env file for persistence AND applies it
+      live to process.env immediately (no gateway restart needed). Use this when a newly created
+      skill requires an API key or token. Sensitive values (keys, tokens, secrets) are never
+      echoed back — only confirmed as set.
+    parameters:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Environment variable name (e.g. GITHUB_TOKEN, MY_API_KEY). Automatically uppercased.
+        value:
+          type: string
+          description: The value to set
+      required: [key, value]
+
+  - name: skill_add
+    description: >
+      Add a skill to this agent's skill list in agents.yaml. Use after creating a new skill file
+      so the agent can immediately use it. Defaults to the current agent (by memory_ns / agent_id).
+      No restart needed — agents.yaml is read live.
+    parameters:
+      type: object
+      properties:
+        skill_name:
+          type: string
+          description: Name of the skill to add (must match the skill's name field in its .yaml file)
+        agent_id:
+          type: string
+          description: Agent ID to update (defaults to the current agent)
+      required: [skill_name]
+
+  - name: skill_remove
+    description: Remove a skill from this agent's skill list in agents.yaml.
+    parameters:
+      type: object
+      properties:
+        skill_name:
+          type: string
+          description: Name of the skill to remove
+        agent_id:
+          type: string
+          description: Agent ID to update (defaults to the current agent)
+      required: [skill_name]
+
+  - name: allowed_ids_add
+    description: Add a chat ID to the allowed_ids list for a channel in config.yaml. Use this when the user wants to allow a new person to message the bot. A gateway restart is required for the change to take effect.
+    parameters:
+      type: object
+      properties:
+        channel:
+          type: string
+          description: Channel name (e.g. "telegram", "discord", "slack")
+        chat_id:
+          type: string
+          description: The numeric chat ID or user ID to allow
+      required: [channel, chat_id]
+
+  - name: allowed_ids_remove
+    description: Remove a chat ID from the allowed_ids list for a channel in config.yaml. A gateway restart is required for the change to take effect.
+    parameters:
+      type: object
+      properties:
+        channel:
+          type: string
+          description: Channel name (e.g. "telegram", "discord", "slack")
+        chat_id:
+          type: string
+          description: The numeric chat ID or user ID to remove
+      required: [channel, chat_id]
+
+  - name: heartbeat_read
+    description: >
+      Read the current contents of HEARTBEAT.md — the file that controls what Gary does
+      autonomously on every heartbeat. Read this before making changes.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: heartbeat_write
+    description: >
+      Write the full contents of HEARTBEAT.md — Gary's autonomous instruction file.
+      Called on every heartbeat; Gary reads it and decides what to do.
+      Always call heartbeat_read first, then modify and write the full updated content.
+      Use markdown sections (## Heading) to organise tasks. Keep instructions clear and
+      tool-specific (e.g. "call forex_monitor_check", "call get_positions").
+    parameters:
+      type: object
+      properties:
+        content:
+          type: string
+          description: Full new content of HEARTBEAT.md
+      required: [content]
+
+  - name: list_voices
+    description: >
+      Fetch all available ElevenLabs TTS voices with their IDs, names, gender, accent, and use case.
+      Also shows which voice is currently active (ELEVENLABS_VOICE_ID).
+      Call this before set_voice to find a voice_id. Requires ELEVENLABS_API_KEY to be set.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: set_voice
+    description: >
+      Change the ElevenLabs TTS voice used for all future responses. Writes ELEVENLABS_VOICE_ID
+      to .env and applies it immediately — no restart needed. Use list_voices first to find a voice_id.
+    parameters:
+      type: object
+      properties:
+        voice_id:
+          type: string
+          description: ElevenLabs voice ID (e.g. 21m00Tcm4TlvDq8ikWAM for Rachel). Get IDs from list_voices.
+      required: [voice_id]
+
+  - name: list_skills
+    description: List all installed skills in ~/.aura/skills/ — shows name, enabled status, and description. Use this instead of workspace_list when you want to see what skills are available.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: list_models
+    description: Show all available LLM models (based on which API keys are set), the current routing config, and how to switch. Call this before switch_model to see what's available.
+    parameters:
+      type: object
+      properties: {}
+      required: []
+
+  - name: switch_model
+    description: Switch the LLM model for one or all tiers. Writes config.yaml and hot-reloads immediately — no restart needed. Use list_models first to see available options.
+    parameters:
+      type: object
+      properties:
+        model:
+          type: string
+          description: "Model string, e.g. 'claude-sonnet-4-6', 'claude-haiku-4-5', 'gpt-4o', 'ollama/kimi-k2.5:cloud', 'gemini-1.5-pro'"
+        tier:
+          type: string
+          description: "Which tier to update: 'simple', 'complex', 'creative', 'vision', 'offline', or 'all' (default: all)"
+      required: [model]

@@ -1,0 +1,26 @@
+name: whoop
+version: 1.0.0
+description: Access WHOOP health data (recovery, sleep, strain)
+executor: whoop.ts
+enabled: true
+source: human
+requires_env: [WHOOP_CLIENT_ID, WHOOP_CLIENT_SECRET]
+tools:
+  - name: whoop_recovery
+    description: Get WHOOP recovery score and HRV data
+    parameters:
+      type: object
+      properties:
+        date: { type: string, description: "Date in YYYY-MM-DD format (omit for today)" }
+  - name: whoop_sleep
+    description: Get WHOOP sleep performance data
+    parameters:
+      type: object
+      properties:
+        date: { type: string, description: "Date in YYYY-MM-DD format (omit for today)" }
+  - name: whoop_strain
+    description: Get WHOOP strain score and activity data
+    parameters:
+      type: object
+      properties:
+        date: { type: string, description: "Date in YYYY-MM-DD format (omit for today)" }

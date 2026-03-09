@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AURA · Agent Teams</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080b14;--surface:#0f1320;--card:#131827;--border:#1e2438;
+  --purple:#7c6aff;--blue:#60a5fa;--green:#4ade80;--amber:#fb923c;--red:#f87171;--cyan:#22d3ee;--pink:#f472b6;
+  --muted:#4a5568;--text:#e2e8f0;--sub:#94a3b8;--dim:#64748b
+}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+/* Header */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0;z-index:20}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%{box-shadow:0 0 0 0 #4ade8088}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.running-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);animation:pulse-amber 1.5s infinite}
+@keyframes pulse-amber{0%{box-shadow:0 0 0 0 #fb923c88}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
+header h1{font-size:15px;font-weight:700}
+.badge{font-size:9px;font-weight:800;letter-spacing:.6px;padding:2px 8px;border-radius:20px;background:linear-gradient(135deg,#7c6aff,#4f46e5);color:#fff}
+.hstats{display:flex;gap:14px;margin-left:auto;font-size:11px}
+.hstat{display:flex;align-items:center;gap:4px;color:var(--sub)}
+.hstat b{font-size:13px;font-weight:700}
+.hstat.green b{color:var(--green)}.hstat.amber b{color:var(--amber)}.hstat.blue b{color:var(--blue)}
+.btn{padding:6px 13px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:linear-gradient(135deg,#7c6aff,#4f46e5);color:#fff}
+.btn-primary:hover{box-shadow:0 0 14px #7c6aff44;transform:translateY(-1px)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--sub)}
+.btn-ghost:hover{border-color:var(--purple);color:var(--text)}
+
+/* Layout */
+.layout{display:grid;grid-template-columns:230px 1fr 280px;flex:1;overflow:hidden;min-height:0}
+
+/* Sessions sidebar */
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sb-head{padding:10px 12px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--sub);text-transform:uppercase}
+.sess-list{flex:1;overflow-y:auto}
+.sess-item{padding:10px 12px;border-bottom:1px solid #0d112044;cursor:pointer;transition:background .12s}
+.sess-item:hover{background:#ffffff07}
+.sess-item.active{background:#1e1b4b2a;border-left:2px solid var(--purple)}
+.sess-objective{font-size:11px;font-weight:600;color:var(--text);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sess-meta{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10px;color:var(--dim)}
+.status-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700}
+.s-running{background:#451a0344;color:var(--amber)}.s-done{background:#14532d44;color:var(--green)}.s-error{background:#450a0a44;color:var(--red)}
+.sess-empty{padding:40px 16px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7}
+
+/* Main */
+.main{display:flex;flex-direction:column;overflow:hidden}
+.main-head{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.objective-text{font-size:13px;font-weight:600;color:var(--text);line-height:1.4}
+.objective-meta{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:10px;color:var(--dim)}
+.no-session{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted)}
+.no-session .big{font-size:42px}
+.no-session p{font-size:12px;color:var(--dim)}
+
+/* Agent grid */
+.agent-grid{flex:1;overflow-y:auto;padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;align-content:start}
+.agent-card{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .2s}
+.agent-card.running{border-color:#fb923c44}
+.agent-card.done{border-color:#4ade8044}
+.agent-card.error{border-color:#f8717144}
+.card-header{padding:10px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+.role-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.role-icon.running{background:#451a0366;animation:glow-amber 2s infinite}
+.role-icon.done{background:#14532d66}
+.role-icon.error{background:#450a0a66}
+@keyframes glow-amber{0%,100%{box-shadow:0 0 0 0 #fb923c00}50%{box-shadow:0 0 8px 2px #fb923c44}}
+.role-name{font-size:12px;font-weight:700;text-transform:capitalize;flex:1}
+.card-status{display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600}
+.card-status.running{color:var(--amber)}.card-status.done{color:var(--green)}.card-status.error{color:var(--red)}
+.card-task{padding:8px 12px;font-size:10px;color:var(--sub);line-height:1.5;border-bottom:1px solid var(--border);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Activity log inside card */
+.card-activity{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:4px;min-height:70px;max-height:140px;overflow-y:auto}
+.activity-item{display:flex;align-items:flex-start;gap:6px;font-size:10px;line-height:1.4}
+.activity-icon{flex-shrink:0;margin-top:1px;font-size:9px}
+.activity-text{color:var(--sub);flex:1;word-break:break-word}
+.activity-text.tool{color:var(--cyan)}
+.activity-text.msg-out{color:var(--purple)}
+.activity-text.msg-in{color:var(--pink)}
+.activity-text.done-txt{color:var(--green)}
+.activity-text.error-txt{color:var(--red)}
+.thinking{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--dim);font-style:italic}
+.dots span{display:inline-block;animation:blink 1.4s infinite;opacity:0}
+.dots span:nth-child(2){animation-delay:.2s}
+.dots span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:0}40%{opacity:1}}
+
+/* Result area */
+.card-result{padding:8px 12px;border-top:1px solid var(--border);font-size:10px;color:var(--green);line-height:1.5;max-height:90px;overflow-y:auto;background:#14532d11}
+.card-error{padding:8px 12px;border-top:1px solid var(--border);font-size:10px;color:var(--red);line-height:1.5;background:#450a0a11}
+
+/* Message feed */
+.feed{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.feed-head{padding:10px 12px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--sub);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+.feed-msgs{flex:1;overflow-y:auto;padding:8px}
+.msg-bubble{margin-bottom:8px;padding:7px 9px;border-radius:8px;background:#0d1120;border:1px solid var(--border)}
+.msg-from{font-size:9px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+.msg-arrow{color:var(--dim);font-size:10px}
+.msg-to{color:var(--cyan)}
+.msg-broadcast{color:var(--amber)}
+.msg-content{font-size:11px;color:var(--text);line-height:1.5;word-break:break-word}
+.msg-ts{font-size:9px;color:var(--dim);margin-top:3px}
+.feed-empty{padding:30px 14px;text-align:center;color:var(--muted);font-size:11px;line-height:1.8}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:#000000cc;z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:580px;max-width:100%;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column}
+.modal-head{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-head h2{font-size:14px;font-weight:700}
+.modal-body{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.modal-foot{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.field-label{font-size:11px;font-weight:600;color:var(--sub);margin-bottom:5px;display:block}
+input,textarea,select{width:100%;background:#0d1120;border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit}
+input:focus,textarea:focus,select:focus{border-color:var(--purple)}
+textarea{resize:vertical;min-height:60px}
+.agent-row{background:#0d1120;border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;position:relative}
+.agent-row-grid{display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:start}
+.remove-agent{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:4px;align-self:center}
+.remove-agent:hover{color:var(--red);background:#450a0a44}
+.add-agent-btn{background:#1e2438;border:1px dashed var(--border);border-radius:7px;padding:8px;color:var(--sub);cursor:pointer;font-size:11px;text-align:center;transition:all .15s;width:100%}
+.add-agent-btn:hover{border-color:var(--purple);color:var(--text)}
+.hidden{display:none!important}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#1e2438;border-radius:4px}::-webkit-scrollbar-thumb:hover{background:#4a5568}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="live-dot"></div>
+  <h1>Agent Teams</h1>
+  <span class="badge">AURA</span>
+  <div class="hstats">
+    <div class="hstat green"><b id="stat-done">0</b> done</div>
+    <div class="hstat amber"><b id="stat-running">0</b> running</div>
+    <div class="hstat blue"><b id="stat-total">0</b> total</div>
+  </div>
+  <button class="btn btn-primary" onclick="openModal()">＋ New Team</button>
+</header>
+
+<div class="layout">
+  <!-- Sessions sidebar -->
+  <div class="sidebar">
+    <div class="sb-head">Sessions</div>
+    <div class="sess-list" id="sess-list">
+      <div class="sess-empty">No sessions yet.<br>Spawn a team to get started.</div>
+    </div>
+  </div>
+
+  <!-- Main: agent cards -->
+  <div class="main" id="main-panel">
+    <div class="no-session" id="no-session">
+      <div class="big">🤖</div>
+      <p>Select a session or spawn a new team</p>
+    </div>
+    <div id="session-view" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+      <div class="main-head">
+        <div class="objective-text" id="obj-text"></div>
+        <div class="objective-meta">
+          <span id="obj-status-chip" class="status-chip"></span>
+          <span id="obj-agent-count" style="color:var(--dim)"></span>
+          <span id="obj-time" style="color:var(--dim)"></span>
+        </div>
+      </div>
+      <div class="agent-grid" id="agent-grid"></div>
+    </div>
+  </div>
+
+  <!-- Message feed -->
+  <div class="feed">
+    <div class="feed-head">
+      <span>💬 Messages</span>
+      <span id="msg-count" style="font-size:10px;font-weight:600;color:var(--purple)"></span>
+    </div>
+    <div class="feed-msgs" id="feed-msgs">
+      <div class="feed-empty">Inter-agent messages will appear here when agents communicate.</div>
+    </div>
+  </div>
+</div>
+
+<!-- New Team Modal -->
+<div class="modal-overlay hidden" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>🚀 Spawn New Team</h2>
+      <button class="btn btn-ghost" onclick="closeModal()" style="padding:4px 10px">✕</button>
+    </div>
+    <div class="modal-body">
+      <div>
+        <label class="field-label">Objective</label>
+        <textarea id="m-objective" rows="2" placeholder="What should this team accomplish?"></textarea>
+      </div>
+      <div>
+        <label class="field-label">Agents</label>
+        <div id="agent-rows" style="display:flex;flex-direction:column;gap:8px">
+          <!-- rows injected by JS -->
+        </div>
+        <button class="add-agent-btn" onclick="addAgentRow()">＋ Add Agent</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="spawnTeam()">🚀 Spawn Team</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let sessions = [];
+let selectedId = null;
+let prevMsgCount = {};
+
+// ── Role → emoji ─────────────────────────────────────────────────────────────
+function roleEmoji(role) {
+  const r = role.toLowerCase();
+  if (r.includes('research'))  return '🔬';
+  if (r.includes('analys'))    return '📊';
+  if (r.includes('writ'))      return '✍️';
+  if (r.includes('code') || r.includes('dev') || r.includes('engineer')) return '💻';
+  if (r.includes('monitor'))   return '📡';
+  if (r.includes('secur'))     return '🔒';
+  if (r.includes('test'))      return '🧪';
+  if (r.includes('plan'))      return '🗺️';
+  if (r.includes('summar'))    return '📝';
+  if (r.includes('review'))    return '👁️';
+  return '🤖';
+}
+
+function roleColor(role, idx) {
+  const colors = ['#7c6aff','#60a5fa','#4ade80','#fb923c','#f472b6','#22d3ee'];
+  return colors[idx % colors.length];
+}
+
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60)  return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  return `${Math.floor(s/3600)}h ago`;
+}
+
+function fmtTime(ts) {
+  return new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// ── Render sessions sidebar ───────────────────────────────────────────────────
+function renderSidebar() {
+  const el = document.getElementById('sess-list');
+  if (!sessions.length) {
+    el.innerHTML = '<div class="sess-empty">No sessions yet.<br>Spawn a team to get started.</div>';
+    return;
+  }
+  el.innerHTML = sessions.map(s => `
+    <div class="sess-item ${s.id === selectedId ? 'active' : ''}" onclick="selectSession('${s.id}')">
+      <div class="sess-objective">${esc(s.objective)}</div>
+      <div class="sess-meta">
+        <span class="status-chip s-${s.status}">
+          ${s.status === 'running' ? '●' : s.status === 'done' ? '✓' : '✗'} ${s.status}
+        </span>
+        <span>${s.agents.length} agent${s.agents.length !== 1 ? 's' : ''}</span>
+        <span>${timeAgo(s.created_at)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Render main agent grid ────────────────────────────────────────────────────
+function renderMain() {
+  const noSess = document.getElementById('no-session');
+  const sessView = document.getElementById('session-view');
+
+  const s = sessions.find(x => x.id === selectedId);
+  if (!s) {
+    noSess.style.display = 'flex';
+    sessView.classList.add('hidden');
+    return;
+  }
+
+  noSess.style.display = 'none';
+  sessView.classList.remove('hidden');
+
+  // Header
+  document.getElementById('obj-text').textContent = s.objective;
+  const statusChip = document.getElementById('obj-status-chip');
+  statusChip.className = `status-chip s-${s.status}`;
+  statusChip.textContent = s.status === 'running' ? '● running' : s.status === 'done' ? '✓ done' : '✗ error';
+  document.getElementById('obj-agent-count').textContent = `${s.agents.length} agents`;
+  document.getElementById('obj-time').textContent = timeAgo(s.created_at);
+
+  // Build activity map from events
+  const events = s.events ?? [];
+  const agentActivity = {}; // role → [{icon, text, cls}]
+  for (const evt of events) {
+    const d = evt.data;
+    const role = d.role;
+    if (!role) continue;
+    if (!agentActivity[role]) agentActivity[role] = [];
+    const act = agentActivity[role];
+    if (evt.type === 'tool_call') {
+      const summary = d.args_summary ? ` — ${String(d.args_summary).slice(0,60)}` : '';
+      act.push({ icon: '⚡', text: `${d.tool}${summary}`, cls: 'tool' });
+    } else if (evt.type === 'agent_message') {
+      if (d.from === role) act.push({ icon: '→', text: `→ ${d.to}: ${String(d.content).slice(0,60)}`, cls: 'msg-out' });
+    } else if (evt.type === 'agent_done') {
+      act.push({ icon: '✓', text: 'Completed', cls: 'done-txt' });
+    } else if (evt.type === 'agent_error') {
+      act.push({ icon: '✗', text: String(d.error).slice(0,80), cls: 'error-txt' });
+    }
+  }
+  // Also track received messages
+  for (const evt of events) {
+    if (evt.type !== 'agent_message') continue;
+    const d = evt.data;
+    const to = d.to === 'all' ? null : d.to;
+    const targets = to ? [to] : s.agents.map(a => a.role).filter(r => r !== d.from);
+    for (const role of targets) {
+      if (!agentActivity[role]) agentActivity[role] = [];
+      agentActivity[role].push({ icon: '←', text: `← ${d.from}: ${String(d.content).slice(0,60)}`, cls: 'msg-in' });
+    }
+  }
+
+  // Render cards
+  const grid = document.getElementById('agent-grid');
+  grid.innerHTML = s.agents.map((agent, idx) => {
+    const color = roleColor(agent.role, idx);
+    const emoji = roleEmoji(agent.role);
+    const acts = (agentActivity[agent.role] ?? []).slice(-5); // last 5 activity items
+    const isRunning = agent.status === 'running';
+    const isDone    = agent.status === 'done';
+    const isError   = agent.status === 'error';
+
+    const activityHtml = acts.length
+      ? acts.map(a => `<div class="activity-item"><span class="activity-icon">${a.icon}</span><span class="activity-text ${a.cls}">${esc(a.text)}</span></div>`).join('')
+      : isRunning
+        ? `<div class="thinking"><span style="color:${color}">◉</span> Thinking<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>`
+        : '';
+
+    const resultHtml = isDone && agent.result
+      ? `<div class="card-result">${esc(agent.result.slice(0, 400))}${agent.result.length > 400 ? '…' : ''}</div>`
+      : isError && agent.error
+        ? `<div class="card-error">✗ ${esc(agent.error.slice(0, 300))}</div>`
+        : '';
+
+    return `
+      <div class="agent-card ${agent.status}">
+        <div class="card-header">
+          <div class="role-icon ${agent.status}" style="background:${color}22;border:1px solid ${color}44">${emoji}</div>
+          <span class="role-name" style="color:${color}">${esc(agent.role)}</span>
+          <span class="card-status ${agent.status}">
+            ${isRunning ? '<span class="running-dot"></span> running' : isDone ? '✓ done' : '✗ error'}
+          </span>
+        </div>
+        <div class="card-task">${esc(agent.task)}</div>
+        <div class="card-activity">${activityHtml}</div>
+        ${resultHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Render message feed ───────────────────────────────────────────────────────
+function renderFeed() {
+  const el = document.getElementById('feed-msgs');
+  const s = sessions.find(x => x.id === selectedId);
+
+  if (!s) {
+    el.innerHTML = '<div class="feed-empty">Inter-agent messages will appear here when agents communicate.</div>';
+    document.getElementById('msg-count').textContent = '';
+    return;
+  }
+
+  const msgs = (s.events ?? []).filter(e => e.type === 'agent_message');
+  document.getElementById('msg-count').textContent = msgs.length ? `${msgs.length} messages` : '';
+
+  if (!msgs.length) {
+    el.innerHTML = '<div class="feed-empty">No messages yet.<br>Agents will communicate here as they work.</div>';
+    return;
+  }
+
+  const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+
+  el.innerHTML = msgs.map(e => {
+    const d = e.data;
+    const isBroadcast = d.to === 'all';
+    const toHtml = isBroadcast
+      ? `<span class="msg-arrow">→</span><span class="msg-broadcast">all</span>`
+      : `<span class="msg-arrow">→</span><span class="msg-to">${esc(d.to)}</span>`;
+    return `
+      <div class="msg-bubble">
+        <div class="msg-from">
+          <span style="color:var(--purple)">${esc(d.from)}</span>
+          ${toHtml}
+        </div>
+        <div class="msg-content">${esc(d.content)}</div>
+        <div class="msg-ts">${fmtTime(e.ts)}</div>
+      </div>
+    `;
+  }).join('');
+
+  if (wasAtBottom) el.scrollTop = el.scrollHeight;
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats() {
+  document.getElementById('stat-total').textContent   = sessions.length;
+  document.getElementById('stat-running').textContent = sessions.filter(s => s.status === 'running').length;
+  document.getElementById('stat-done').textContent    = sessions.filter(s => s.status === 'done').length;
+}
+
+// ── Fetch & refresh ───────────────────────────────────────────────────────────
+async function load() {
+  try {
+    const res = await fetch('/dashboard4/api/sessions');
+    sessions = await res.json();
+
+    // Auto-select first session if nothing selected
+    if (!selectedId && sessions.length) selectSession(sessions[0].id, false);
+
+    renderSidebar();
+    renderMain();
+    renderFeed();
+    updateStats();
+  } catch(e) { console.error('Load error:', e); }
+}
+
+function selectSession(id, rerender = true) {
+  selectedId = id;
+  if (rerender) { renderSidebar(); renderMain(); renderFeed(); }
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+let agentCount = 0;
+
+function openModal() {
+  agentCount = 0;
+  document.getElementById('m-objective').value = '';
+  document.getElementById('agent-rows').innerHTML = '';
+  addAgentRow(); addAgentRow(); // start with 2 rows
+  document.getElementById('modal').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+function addAgentRow() {
+  agentCount++;
+  const id = agentCount;
+  const div = document.createElement('div');
+  div.className = 'agent-row';
+  div.id = `ar-${id}`;
+  div.innerHTML = `
+    <div class="agent-row-grid">
+      <div>
+        <label class="field-label">Role</label>
+        <input type="text" id="ar-role-${id}" placeholder="e.g. researcher">
+      </div>
+      <div>
+        <label class="field-label">Task</label>
+        <input type="text" id="ar-task-${id}" placeholder="What this agent should do">
+      </div>
+      <button class="remove-agent" onclick="removeAgentRow(${id})" title="Remove">✕</button>
+    </div>
+    <div>
+      <label class="field-label">Skills (comma-separated, optional)</label>
+      <input type="text" id="ar-tools-${id}" placeholder="web_search, ec2_workflow_automation">
+    </div>
+  `;
+  document.getElementById('agent-rows').appendChild(div);
+}
+
+function removeAgentRow(id) {
+  const el = document.getElementById(`ar-${id}`);
+  if (el) el.remove();
+}
+
+async function spawnTeam() {
+  const objective = document.getElementById('m-objective').value.trim();
+  if (!objective) { alert('Please enter an objective'); return; }
+
+  const agents = [];
+  document.querySelectorAll('.agent-row').forEach(row => {
+    const id = row.id.replace('ar-','');
+    const role  = document.getElementById(`ar-role-${id}`)?.value.trim();
+    const task  = document.getElementById(`ar-task-${id}`)?.value.trim();
+    const tools = document.getElementById(`ar-tools-${id}`)?.value.trim();
+    if (role && task) {
+      agents.push({ role, task, tools: tools ? tools.split(',').map(t => t.trim()).filter(Boolean) : [] });
+    }
+  });
+
+  if (!agents.length) { alert('Add at least one agent'); return; }
+
+  closeModal();
+
+  const res = await fetch('/dashboard4/api/spawn', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ objective, agents }),
+  });
+  const data = await res.json();
+  selectedId = data.session_id;
+  await load();
+}
+
+// ── Escape HTML ───────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+load();
+setInterval(load, 2000);
+</script>
+</body>
+</html>

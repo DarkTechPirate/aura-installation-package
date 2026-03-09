@@ -1,0 +1,227 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import type { ANPEvent } from '../anp/types.js';
+import type { AgentConfig } from '../agents/types.js';
+import type { LLMMessage, LLMParams, ToolDefinition } from './types.js';
+import type { GatewayConfig } from '../config/loader.js';
+
+const CONTACTS_FILE = path.join(os.homedir(), '.aura', 'workspace', 'contacts.md');
+
+// Module-level mtime cache — contacts.md rarely changes so no need to hit disk every message.
+let _contactsCache: { content: string; mtime: number } | null = null;
+
+function readContactsFile(): string {
+  try {
+    if (!fs.existsSync(CONTACTS_FILE)) return '';
+    const mtime = fs.statSync(CONTACTS_FILE).mtimeMs;
+    if (_contactsCache && _contactsCache.mtime === mtime) return _contactsCache.content;
+    const content = fs.readFileSync(CONTACTS_FILE, 'utf8');
+    _contactsCache = { content, mtime };
+    return content;
+  } catch { return ''; }
+}
+
+/** Look up a sender name from contacts.md by node_id or chat_id. Returns null if not found. */
+function lookupSender(nodeId: string): { name: string; notes?: string } | null {
+  try {
+    const raw = readContactsFile();
+    if (!raw) return null;
+    const chatId = nodeId.replace(/^[a-z_]+_/, ''); // e.g. telegram_1012325503 → 1012325503
+    for (const line of raw.split('\n')) {
+      // Match markdown table rows: | Name | chat_id | node_id | ... |
+      const cols = line.split('|').map(c => c.trim()).filter(Boolean);
+      if (cols.length < 3) continue;
+      if (cols[2] === nodeId || cols[1] === chatId) {
+        return { name: cols[0]!, notes: cols[4] ?? undefined };
+      }
+    }
+  } catch { /* non-fatal */ }
+  return null;
+}
+
+const MAX_MESSAGES = 20;
+
+export interface ContextBuildParams {
+  event:        ANPEvent;
+  agent:        AgentConfig;
+  shortTerm:    LLMMessage[];
+  semanticHits: string[];
+  toolDefs:     ToolDefinition[];
+  config:       GatewayConfig;
+  userProfile:  string;
+  selfKnowledge: string;
+  /** All installed skills (name + description) for awareness. */
+  installedSkills?: Array<{ name: string; description: string }>;
+  /** Skill names that are installed but not loaded this turn (keyword not matched). */
+  unloadedSkillNames?: string[];
+}
+
+/**
+ * Assembles the LLM system prompt, message history, and tool definitions
+ * for a given ANP utterance event and agent configuration.
+ */
+export class ContextBuilder {
+  async build(params: ContextBuildParams): Promise<LLMParams> {
+    const { event, agent, shortTerm, semanticHits, toolDefs, config, userProfile, selfKnowledge, installedSkills, unloadedSkillNames } = params;
+
+    const now = new Date().toISOString();
+
+    // ── Identity & persona ────────────────────────────────────────────────────
+    let system = agent.persona.trim();
+
+    // Hard identity rule — prevent the model from describing itself as the
+    // underlying LLM when asked "what are you" or "what can you do".
+    system += `\n\nYour name is ${agent.name}. You are a personal AI assistant.`;
+
+    // ── Sender identity ───────────────────────────────────────────────────────
+    // Look up who is messaging from contacts.md so Gary always knows the sender.
+    const sender = lookupSender(event.node_id);
+    if (sender) {
+      system += `\n\nYou are currently talking with: ${sender.name} (node_id: ${event.node_id})`;
+      if (sender.notes) system += ` — Notes: ${sender.notes}`;
+    } else {
+      system += `\n\nYou are currently talking with: unknown contact (node_id: ${event.node_id})`;
+      system += `\nIf they introduce themselves, save them to contacts.md using the filesystem skill.`;
+    }
+    system += `\nNever mention, reveal, or discuss the AI model, LLM provider, or ` +
+              `technology powering you. If asked, say you are ${agent.name} and describe ` +
+              `your capabilities below — nothing more.`;
+
+    // ── Capabilities summary ──────────────────────────────────────────────────
+    // Build from the actual loaded tool definitions so this always stays in sync.
+    // Canvas internals are excluded from the narrative; everything else is shown.
+    const nonInternalTools = toolDefs.filter(
+      t => !['canvas_clear','canvas_append','canvas_update','canvas_delete'].includes(t.name)
+    );
+
+    if (nonInternalTools.length > 0) {
+      system += `\n\nYour capabilities (tools you can use):`;
+      for (const t of nonInternalTools) {
+        system += `\n- ${t.name}: ${t.description}`;
+      }
+      system += `\n\nWhen asked what you can do, describe these capabilities naturally in ` +
+                `your own voice — do not list raw tool names. ALWAYS mention that you can ` +
+                `send messages to Telegram and other channels, and that you can create new ` +
+                `skills on the fly with create_skill.`;
+    }
+
+    // ── Gateway self-awareness ────────────────────────────────────────────────
+    // Tell the agent about its own infrastructure so it can answer accurately
+    // when users ask about ports, endpoints, or the system's status.
+    const bind     = config.security.bind_address ?? '127.0.0.1';
+    const restPort = config.security.rest_port   ?? 3002;
+    const anpPort  = config.security.anp_port    ?? 8765;
+    const wcPort   = (config.channels['webchat']?.['port'] as number | undefined) ?? 3000;
+    const cvPort   = config.canvas.port          ?? 3001;
+
+    system += `\n\nYou are running as the AURA Gateway on this machine. Your own endpoints:`;
+    system += `\n- REST API (webhooks, status, reminders): http://${bind}:${restPort}`;
+    system += `\n- ANP WebSocket (agent protocol):         ws://${bind}:${anpPort}/anp`;
+    system += `\n- WebChat WebSocket (browser UI):         ws://${bind}:${wcPort}`;
+    system += `\n- Canvas WebSocket (live canvas):         ws://${bind}:${cvPort}/canvas`;
+    system += `\n- EC2 Control Panel (visual dashboard):  http://${bind}:${restPort}/dashboard2`;
+    system += `\n- LLM Config Dashboard:                  http://${bind}:${restPort}/dashboard`;
+    system += `\nWhen the user asks about a port or service, refer to the above — ` +
+              `port ${restPort} is YOUR REST API, not an external webhook receiver.`;
+    system += `\n\nEC2 Dashboard API (use these when working with ec2_workflow_automation):`;
+    system += `\n- View live workflows:  GET  http://${bind}:${restPort}/dashboard2/api/workflows`;
+    system += `\n- Run a workflow:       POST http://${bind}:${restPort}/dashboard2/api/run  { name, steps[] }`;
+    system += `\n- Load templates:       GET  http://${bind}:${restPort}/dashboard2/api/templates`;
+    system += `\nAlways tell the user to open http://${bind}:${restPort}/dashboard2 to see live workflow status.`;
+
+    // ── Live channel connections ───────────────────────────────────────────────
+    // Tell the agent exactly which channels are active and what node_ids to use,
+    // so it never has to guess when the user asks it to send a message.
+    const enabledChannels = Object.entries(config.channels)
+      .filter(([, cfg]) => (cfg as Record<string, unknown>)['enabled'] === true)
+      .map(([name]) => name);
+
+    system += `\n\nYour active channels (you can send messages to these right now):`;
+    for (const ch of enabledChannels) {
+      const chCfg = config.channels[ch] as Record<string, unknown>;
+      if (ch === 'webchat') {
+        system += `\n- webchat (browser UI at port ${wcPort})`;
+      } else if (ch === 'telegram') {
+        const ids = (chCfg['allowed_ids'] as (string | number)[] | undefined) ?? [];
+        system += `\n- telegram — send_message node_id format: telegram_<chat_id>`;
+        if (ids.length > 0) {
+          system += `\n  Authorised chat IDs: ${ids.join(', ')}`;
+          system += `\n  To text the user: send_message({ node_id: "telegram_${ids[0]}", text: "..." })`;
+        }
+      } else {
+        system += `\n- ${ch}`;
+      }
+    }
+    system += `\n\nYour assigned channels (from agents.yaml): ${agent.channels.filter(c => c !== '__default__').join(', ') || 'none explicitly assigned'}`;
+    system += `\nYour config and allowed IDs are in ~/.aura/config.yaml — use config_read or allowed_ids_add/remove to inspect or change them.`;
+
+    // ── Skill creation rules ──────────────────────────────────────────────────
+    system += `\n\nSKILL CREATION RULES (critical):`;
+    system += `\n- ALWAYS use create_skill to create new skills — never write skill files manually.`;
+    system += `\n- Never write .ts or .yaml files to the workspace or anywhere else for skills.`;
+    system += `\n- create_skill handles generation, TypeScript validation, and installation to ~/.aura/skills/ automatically.`;
+    system += `\n- The workspace (~/.aura/workspace/) is for user data only — not for skill drafts or code.`;
+
+    // ── Unloaded skills catalogue ─────────────────────────────────────────────
+    // Skills you have but aren't loaded this turn — you're aware of them but
+    // can't call their tools until the user's next message triggers them.
+    if (unloadedSkillNames && unloadedSkillNames.length > 0 && installedSkills) {
+      const unloadedDefs = installedSkills.filter(s => unloadedSkillNames.includes(s.name));
+      if (unloadedDefs.length > 0) {
+        system += `\n\nYour other installed skills (available but not active this turn — mention them if relevant):`;
+        for (const s of unloadedDefs) {
+          const desc = s.description.replace(/\n/g, ' ').slice(0, 120);
+          system += `\n- ${s.name}: ${desc}`;
+        }
+      }
+    }
+
+    // ── Long-term profiles ────────────────────────────────────────────────────
+    // What the agent knows about the user and about itself, learned over time.
+    if (userProfile.trim()) {
+      system += `\n\n## What I know about the user\n${userProfile.slice(0, 3000)}`;
+    }
+    if (selfKnowledge.trim()) {
+      system += `\n\n## What I know about myself\n${selfKnowledge.slice(0, 2000)}`;
+      system += `\n\nIMPORTANT: The tool list above is the authoritative source of your capabilities. ` +
+                `If any self-knowledge entry contradicts an available tool, the tool list wins. ` +
+                `Never refuse to use a tool that is present in your tool list based on a memory entry.`;
+    }
+
+    // ── Time & memory ─────────────────────────────────────────────────────────
+    system += `\n\nCurrent time: ${now}`;
+
+    if (semanticHits.length > 0) {
+      // Cap to 5 hits × 400 chars each — enough context without flooding
+      const capped = semanticHits.slice(0, 5).map(h => h.slice(0, 400));
+      system += `\n\nRelevant memory:\n${capped.join('\n')}`;
+    }
+
+    // ── Message history ───────────────────────────────────────────────────────
+    // Token budget: keep only last MAX_MESSAGES turns
+    let messages = shortTerm.slice(-MAX_MESSAGES);
+
+    // Append current utterance as user message if not already in history
+    const payload = event.payload as Record<string, unknown>;
+    if (payload?.text && typeof payload.text === 'string') {
+      const lastMsg = messages[messages.length - 1];
+      const alreadyAdded = lastMsg?.role === 'user' && lastMsg?.content === payload.text;
+      if (!alreadyAdded) {
+        const userMsg: LLMMessage = { role: 'user', content: payload.text };
+        // Pass image data through so vision-capable adapters can use it
+        if (payload.image_b64 && typeof payload.image_b64 === 'string') {
+          userMsg.image_b64 = payload.image_b64;
+        }
+        messages = [...messages, userMsg];
+      }
+    }
+
+    return {
+      system,
+      messages,
+      tools: toolDefs.length > 0 ? toolDefs : undefined,
+      max_tokens: 4096,
+    };
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "aura-gateway",
+  "version": "1.0.0",
+  "description": "AURA Gateway - self-hosted AI agent brain",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env ./node_modules/.bin/tsx src/server.ts",
+    "dev": "node --env-file=.env ./node_modules/.bin/tsx --watch src/server.ts",
+    "build": "tsc",
+    "test": "vitest",
+    "onboard": "node agent.js onboard",
+    "daemon": "node agent.js --daemon",
+    "status": "node agent.js status",
+    "stop": "node agent.js stop",
+    "logs": "node agent.js logs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@aws-sdk/client-auto-scaling": "^3.1004.0",
+    "@aws-sdk/client-cloudwatch": "^3.1004.0",
+    "@aws-sdk/client-ec2": "^3.1004.0",
+    "@aws-sdk/client-ssm": "^3.1004.0",
+    "@google/generative-ai": "^0.24.1",
+    "@notionhq/client": "^5.11.1",
+    "@slack/bolt": "^3.22.0",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^12.6.2",
+    "botbuilder": "^4.23.3",
+    "chokidar": "^5.0.0",
+    "discord.js": "^14.25.1",
+    "googleapis": "^171.0.0",
+    "js-yaml": "^4.1.1",
+    "mdns": "^2.7.2",
+    "node-cron": "^4.2.1",
+    "openai": "^6.27.0",
+    "playwright": "^1.58.2",
+    "telegraf": "^4.16.3",
+    "twitter-api-v2": "^1.29.0",
+    "whatsapp-web.js": "^1.34.6",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.0.0"
+  }
+}

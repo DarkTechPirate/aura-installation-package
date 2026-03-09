@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AURA Gateway · Dashboard</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+  header{background:#1a1d2e;border-bottom:1px solid #2d3148;padding:16px 24px;display:flex;align-items:center;gap:12px}
+  header h1{font-size:18px;font-weight:600;letter-spacing:.5px}
+  header .pill{background:#6c63ff22;color:#a78bfa;border:1px solid #6c63ff44;border-radius:20px;padding:3px 10px;font-size:12px}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e}
+  main{max-width:900px;margin:32px auto;padding:0 24px}
+  section{background:#1a1d2e;border:1px solid #2d3148;border-radius:12px;margin-bottom:24px;overflow:hidden}
+  section h2{font-size:13px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:#94a3b8;padding:16px 20px;border-bottom:1px solid #2d3148;display:flex;align-items:center;gap:8px}
+  section h2 svg{opacity:.6}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:#64748b;padding:10px 20px;text-align:left;background:#151824}
+  td{padding:12px 20px;border-top:1px solid #1e2235;vertical-align:middle}
+  td:first-child{font-weight:500;color:#cbd5e1;width:110px}
+  select{background:#0f1117;border:1px solid #2d3148;color:#e2e8f0;padding:7px 32px 7px 10px;border-radius:8px;font-size:13px;width:100%;cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s}
+  select:focus{outline:none;border-color:#6c63ff}
+  select:hover{border-color:#4a5280}
+  optgroup{color:#94a3b8;font-size:11px}
+  option{color:#e2e8f0;background:#1a1d2e}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:500}
+  .badge.ok{background:#14532d44;color:#4ade80;border:1px solid #14532d}
+  .badge.off{background:#1e1b4b44;color:#94a3b8;border:1px solid #2d3148}
+  .badge.warn{background:#78350f44;color:#fb923c;border:1px solid #78350f}
+  .providers-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding:16px 20px}
+  .provider-card{background:#151824;border:1px solid #2d3148;border-radius:10px;padding:14px;transition:border-color .15s}
+  .provider-card:hover{border-color:#4a5280}
+  .provider-card h3{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+  .provider-card label{font-size:11px;color:#64748b;display:block;margin-bottom:4px;margin-top:10px}
+  .provider-card input{background:#0f1117;border:1px solid #2d3148;color:#e2e8f0;padding:7px 10px;border-radius:7px;font-size:12px;width:100%;font-family:monospace;transition:border-color .15s}
+  .provider-card input:focus{outline:none;border-color:#6c63ff}
+  .provider-card .save-key{margin-top:8px;background:#6c63ff;color:#fff;border:none;padding:6px 14px;border-radius:7px;font-size:12px;cursor:pointer;transition:background .15s}
+  .provider-card .save-key:hover{background:#5b52e0}
+  .provider-card .models-list{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .provider-card .model-tag{background:#1e2235;border:1px solid #2d3148;color:#94a3b8;font-size:10px;padding:2px 7px;border-radius:5px;font-family:monospace}
+  .footer-bar{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #2d3148;background:#151824}
+  .btn{padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+  .btn-primary{background:#6c63ff;color:#fff}
+  .btn-primary:hover{background:#5b52e0}
+  .btn-primary:disabled{background:#2d3148;color:#64748b;cursor:not-allowed}
+  .toast{position:fixed;bottom:24px;right:24px;background:#1a1d2e;border:1px solid #2d3148;border-radius:10px;padding:12px 18px;font-size:13px;display:flex;align-items:center;gap:8px;transform:translateY(80px);opacity:0;transition:all .25s;pointer-events:none;z-index:999}
+  .toast.show{transform:translateY(0);opacity:1}
+  .toast.success{border-color:#14532d;color:#4ade80}
+  .toast.error{border-color:#7f1d1d;color:#f87171}
+  .reload-log{font-size:11px;color:#4ade80;font-family:monospace;margin-left:8px;opacity:0;transition:opacity .3s}
+  .reload-log.show{opacity:1}
+  #ollama-status{font-size:11px;color:#94a3b8;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <div class="status-dot" id="hdr-dot"></div>
+  <h1>AURA Gateway</h1>
+  <span class="pill">LLM Dashboard</span>
+</header>
+
+<main>
+  <!-- LLM Routing -->
+  <section>
+    <h2>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      Tier Routing
+    </h2>
+    <table>
+      <thead><tr><th>Tier</th><th>Model</th><th>Status</th></tr></thead>
+      <tbody id="routing-body">
+        <tr><td colspan="3" style="color:#64748b;text-align:center;padding:24px">Loading…</td></tr>
+      </tbody>
+    </table>
+    <div class="footer-bar">
+      <span class="reload-log" id="reload-log">⚡ Reloaded — takes effect immediately</span>
+      <button class="btn btn-primary" id="apply-btn" disabled>Apply Changes</button>
+    </div>
+  </section>
+
+  <!-- Providers -->
+  <section>
+    <h2>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      Providers &amp; API Keys
+    </h2>
+    <div class="providers-grid" id="providers-grid">
+      <div style="color:#64748b;padding:8px">Loading…</div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';  // same origin
+
+// ── State ──────────────────────────────────────────────────────────────────
+let currentConfig = null;
+let pendingRouting = {};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = (type === 'success' ? '✓ ' : '✗ ') + msg;
+  el.className = 'toast show ' + type;
+  setTimeout(() => el.className = 'toast', 3000);
+}
+
+function badge(label, type) {
+  return `<span class="badge ${type}">${label}</span>`;
+}
+
+function modelBadge(modelStr, providers) {
+  const [prov] = modelStr.includes('/') ? modelStr.split('/') : [modelStr.startsWith('claude') ? 'claude' : modelStr.startsWith('gpt') ? 'openai' : modelStr.startsWith('gemini') ? 'gemini' : (modelStr.startsWith('qwen-') || modelStr.startsWith('qwq-') || modelStr.startsWith('qvq-')) ? 'qwen' : 'unknown'];
+  if (prov === 'ollama') return badge('Ollama', 'ok');
+  const p = providers[prov];
+  if (!p) return badge('unknown', 'off');
+  return p.api_key_set ? badge('Key set ✓', 'ok') : badge('No API key', 'warn');
+}
+
+// ── All available models as <optgroup> list ────────────────────────────────
+function buildModelOptions(providers, currentValue) {
+  let html = `<option value="${currentValue}">${currentValue} (current)</option>`;
+
+  // Ollama models
+  const ollama = providers.ollama;
+  if (ollama?.models?.length) {
+    html += `<optgroup label="Ollama (local)">`;
+    for (const m of ollama.models) {
+      const val = `ollama/${m}`;
+      if (val !== currentValue) html += `<option value="${val}">${m}</option>`;
+    }
+    html += `</optgroup>`;
+  }
+
+  // Cloud providers
+  const cloudProvs = [
+    ['claude',      'Claude (Anthropic)'],
+    ['openai',      'OpenAI'],
+    ['gemini',      'Gemini (Google)'],
+    ['mistral',     'Mistral AI'],
+    ['openrouter',  'OpenRouter'],
+    ['qwen',        'Qwen (Alibaba)'],
+  ];
+  for (const [key, label] of cloudProvs) {
+    const p = providers[key];
+    if (!p?.models?.length) continue;
+    const suffix = p.api_key_set ? '' : ' ⚠ no key';
+    html += `<optgroup label="${label}${suffix}">`;
+    for (const m of p.models) {
+      if (m !== currentValue) html += `<option value="${m}">${m}</option>`;
+    }
+    html += `</optgroup>`;
+  }
+  return html;
+}
+
+// ── Render routing table ───────────────────────────────────────────────────
+function renderRouting(routing, providers) {
+  const tbody = document.getElementById('routing-body');
+  const tiers = ['simple', 'complex', 'vision', 'audio', 'video', 'creative', 'offline'];
+  tbody.innerHTML = tiers.map(tier => {
+    const current = routing[tier] ?? '(not set)';
+    return `
+      <tr>
+        <td>${tier}</td>
+        <td>
+          <select data-tier="${tier}" onchange="onTierChange(this)">
+            ${buildModelOptions(providers, current)}
+          </select>
+        </td>
+        <td>${modelBadge(current, providers)}</td>
+      </tr>`;
+  }).join('');
+}
+
+function onTierChange(sel) {
+  const tier = sel.dataset.tier;
+  pendingRouting[tier] = sel.value;
+  // update badge in same row
+  const td = sel.closest('tr').querySelector('td:last-child');
+  td.innerHTML = modelBadge(sel.value, currentConfig.providers);
+  document.getElementById('apply-btn').disabled = false;
+}
+
+// ── Render providers ───────────────────────────────────────────────────────
+function renderProviders(providers) {
+  const grid = document.getElementById('providers-grid');
+  const cards = [];
+
+  // Ollama card
+  const ollama = providers.ollama ?? {};
+  const ollamaModels = (ollama.models ?? []).map(m => `<span class="model-tag">${m}</span>`).join('');
+  cards.push(`
+    <div class="provider-card">
+      <h3>Ollama <span class="badge ok">Local</span></h3>
+      <div style="font-size:11px;color:#64748b">${ollama.base_url ?? 'http://localhost:11434'}</div>
+      <label>Available models</label>
+      <div class="models-list">${ollamaModels || '<span style="font-size:11px;color:#64748b">None found</span>'}</div>
+      <div id="ollama-status"></div>
+    </div>`);
+
+  // Cloud provider cards
+  const cloudInfo = [
+    ['claude',     'Claude',      'ANTHROPIC_API_KEY'],
+    ['openai',     'OpenAI',      'OPENAI_API_KEY'],
+    ['gemini',     'Gemini',      'GOOGLE_API_KEY'],
+    ['mistral',    'Mistral',     'MISTRAL_API_KEY'],
+    ['openrouter', 'OpenRouter',  'OPENROUTER_API_KEY'],
+  ];
+  for (const [key, label, envVar] of cloudInfo) {
+    const p = providers[key] ?? {};
+    const isSet = p.api_key_set;
+    const models = (p.models ?? []).map(m => `<span class="model-tag">${m}</span>`).join('');
+    cards.push(`
+      <div class="provider-card">
+        <h3>${label} ${isSet ? badge('Key set', 'ok') : badge('No key', 'off')}</h3>
+        <label>${envVar}</label>
+        <input type="password" placeholder="${isSet ? '••••••••••••' : 'sk-...'}" id="key-${key}" autocomplete="off">
+        <button class="save-key" onclick="saveKey('${key}', '${envVar}')">Save Key</button>
+        <label>Models</label>
+        <div class="models-list">${models}</div>
+      </div>`);
+  }
+
+  grid.innerHTML = cards.join('');
+}
+
+// ── Apply routing ──────────────────────────────────────────────────────────
+document.getElementById('apply-btn').addEventListener('click', async () => {
+  if (!Object.keys(pendingRouting).length) return;
+  const btn = document.getElementById('apply-btn');
+  btn.disabled = true;
+  btn.textContent = 'Applying…';
+  try {
+    const res = await fetch(`${API}/api/llm/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routing: pendingRouting }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    pendingRouting = {};
+    const log = document.getElementById('reload-log');
+    log.className = 'reload-log show';
+    setTimeout(() => log.className = 'reload-log', 4000);
+    toast('Routing updated — live immediately');
+    await load(); // refresh to show saved state
+  } catch (e) {
+    toast(e.message, 'error');
+    btn.disabled = false;
+  }
+  btn.textContent = 'Apply Changes';
+});
+
+// ── Save API key ───────────────────────────────────────────────────────────
+async function saveKey(provider, envVar) {
+  const input = document.getElementById('key-' + provider);
+  const key = input.value.trim();
+  if (!key) { toast('Enter a key first', 'error'); return; }
+  try {
+    const res = await fetch(`${API}/api/llm/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: { provider, key } }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    input.value = '';
+    toast(`${envVar} saved`);
+    await load();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ── Load & render ──────────────────────────────────────────────────────────
+async function load() {
+  try {
+    const res = await fetch(`${API}/api/llm/config`);
+    if (!res.ok) throw new Error('Failed to load config');
+    currentConfig = await res.json();
+    renderRouting(currentConfig.routing, currentConfig.providers);
+    renderProviders(currentConfig.providers);
+    document.getElementById('apply-btn').disabled = true;
+  } catch (e) {
+    document.getElementById('routing-body').innerHTML =
+      `<tr><td colspan="3" style="color:#f87171;text-align:center;padding:24px">${e.message}</td></tr>`;
+  }
+}
+
+// ── Health ping ────────────────────────────────────────────────────────────
+async function pingHealth() {
+  try {
+    const res = await fetch(`${API}/api/health`);
+    const dot = document.getElementById('hdr-dot');
+    dot.style.background = res.ok ? '#22c55e' : '#ef4444';
+    dot.style.boxShadow  = res.ok ? '0 0 6px #22c55e' : '0 0 6px #ef4444';
+  } catch {
+    const dot = document.getElementById('hdr-dot');
+    dot.style.background = '#ef4444';
+    dot.style.boxShadow  = '0 0 6px #ef4444';
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+load();
+pingHealth();
+setInterval(pingHealth, 15000);
+</script>
+</body>
+</html>

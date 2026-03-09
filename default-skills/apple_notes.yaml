@@ -1,0 +1,60 @@
+name: apple_notes
+version: 1.0.0
+description: Read and write Apple Notes and Reminders (macOS only)
+executor: apple_notes.ts
+enabled: true
+source: human
+requires_env: []
+tools:
+  - name: notes_list
+    description: List Apple Notes
+    parameters:
+      type: object
+      properties:
+        search: { type: string, description: Optional search filter }
+  - name: notes_read
+    description: Read content of an Apple Note
+    parameters:
+      type: object
+      properties:
+        note_id: { type: string, description: Note ID }
+      required: [note_id]
+  - name: notes_create
+    description: Create a new Apple Note
+    parameters:
+      type: object
+      properties:
+        title: { type: string, description: Note title }
+        body: { type: string, description: Note content }
+        folder: { type: string, description: Optional folder name }
+      required: [title, body]
+  - name: notes_append
+    description: Append content to an Apple Note
+    parameters:
+      type: object
+      properties:
+        note_id: { type: string, description: Note ID }
+        content: { type: string, description: Content to append }
+      required: [note_id, content]
+  - name: apple_reminders_list
+    description: List Apple Reminders
+    parameters:
+      type: object
+      properties:
+        list: { type: string, description: Optional list name }
+  - name: apple_reminders_create
+    description: Create an Apple Reminder
+    parameters:
+      type: object
+      properties:
+        title: { type: string, description: Reminder title }
+        due_iso: { type: string, description: Optional due date ISO 8601 }
+        list: { type: string, description: Optional list name }
+      required: [title]
+  - name: apple_reminders_complete
+    description: Mark an Apple Reminder as complete
+    parameters:
+      type: object
+      properties:
+        reminder_id: { type: string, description: Reminder ID }
+      required: [reminder_id]

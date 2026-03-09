@@ -1,0 +1,43 @@
+name: body_control
+version: 1.0.0
+description: Control AURA body hardware (speaker, LED, display, alerts)
+executor: body_control.ts
+enabled: true
+source: human
+requires_env: []
+tools:
+  - name: speak
+    description: Make the AURA body speak text aloud via ElevenLabs TTS
+    parameters:
+      type: object
+      properties:
+        text: { type: string, description: Text to speak }
+        node_id: { type: string, description: "Target body node (default: aura_body_01)" }
+      required: [text]
+  - name: set_led
+    description: Control the AURA body LED
+    parameters:
+      type: object
+      properties:
+        pattern: { type: string, description: "LED pattern: solid, pulse, breathing, spin, off" }
+        color: { type: string, description: "LED color: green, blue, amber, red, white, off" }
+        node_id: { type: string, description: "Target node (default: aura_body_01)" }
+      required: [pattern, color]
+  - name: send_alert
+    description: Send an alert to the AURA body with optional haptic feedback
+    parameters:
+      type: object
+      properties:
+        text: { type: string, description: Alert message }
+        haptic: { type: string, description: "Haptic: single, double_pulse, long, none" }
+        node_id: { type: string, description: "Target node (default: aura_body_01)" }
+      required: [text]
+  - name: set_display
+    description: Set text on the AURA body display
+    parameters:
+      type: object
+      properties:
+        line1: { type: string, description: First display line }
+        line2: { type: string, description: Second display line (optional) }
+        node_id: { type: string, description: "Target node (default: aura_body_01)" }
+      required: [line1]

@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AURA · Workflow Automation</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080b14;--surface:#0f1320;--card:#131827;--border:#1e2438;
+  --purple:#7c6aff;--blue:#60a5fa;--green:#4ade80;--amber:#fb923c;--red:#f87171;--cyan:#22d3ee;
+  --muted:#4a5568;--text:#e2e8f0;--sub:#94a3b8;--dim:#64748b
+}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+/* ── Header ────────────────────────────────────────────────────────────────── */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 #4ade8088}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
+header h1{font-size:16px;font-weight:700;letter-spacing:-.3px}
+.badge{font-size:9px;font-weight:800;letter-spacing:.6px;padding:3px 9px;border-radius:20px;background:linear-gradient(135deg,#7c6aff,#4f46e5);color:#fff}
+.hstats{display:flex;gap:16px;margin-left:auto;font-size:11px}
+.hstat{display:flex;align-items:center;gap:5px;color:var(--sub)}
+.hstat b{font-size:14px;font-weight:700}
+.hstat.blue b{color:var(--blue)}.hstat.green b{color:var(--green)}.hstat.amber b{color:var(--amber)}.hstat.red b{color:var(--red)}
+.btn{padding:7px 14px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:linear-gradient(135deg,#7c6aff,#4f46e5);color:#fff}
+.btn-primary:hover{box-shadow:0 0 14px #7c6aff44;transform:translateY(-1px)}
+.btn-ghost{background:var(--surface);border:1px solid var(--border);color:var(--sub)}
+.btn-ghost:hover{border-color:var(--purple);color:var(--text)}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-danger{background:#450a0a44;border:1px solid #7f1d1d;color:var(--red)}
+.btn-danger:hover{background:#7f1d1d44}
+.btn-success{background:#14532d44;border:1px solid #166534;color:var(--green)}
+.btn-success:hover{background:#166534aa}
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+.layout{display:grid;grid-template-columns:260px 1fr 260px;height:calc(100vh - 49px);overflow:hidden}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-right{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.main{display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Sidebar: Definitions ───────────────────────────────────────────────────── */
+.sb-head{padding:12px 14px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--sub);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+.def-list{flex:1;overflow-y:auto}
+.def-item{padding:10px 14px;border-bottom:1px solid #0d1120;cursor:pointer;transition:background .1s;display:flex;align-items:flex-start;gap:8px}
+.def-item:hover{background:#ffffff08}
+.def-item.active{background:#1e1b4b33;border-left:2px solid var(--purple)}
+.def-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+.def-info{flex:1;min-width:0}
+.def-name{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.def-meta{font-size:10px;color:var(--dim);margin-top:2px}
+.def-actions{display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.def-item:hover .def-actions{opacity:1}
+.icon-btn{background:none;border:none;cursor:pointer;padding:3px 5px;border-radius:4px;font-size:12px;color:var(--muted);transition:color .15s}
+.icon-btn:hover{color:var(--text);background:#ffffff0f}
+.icon-btn.danger:hover{color:var(--red)}
+.def-empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:12px}
+.trigger-chip{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 6px;border-radius:10px;margin-top:3px}
+.t-manual{background:#1e2438;color:var(--sub)}
+.t-webhook{background:#1e1b4b;color:#a78bfa}
+.t-schedule{background:#1c1917;color:#a8a29e}
+
+/* ── Main: Executions board ─────────────────────────────────────────────────── */
+.board-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.board-title{font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--sub);text-transform:uppercase;flex:1}
+.board-scroll{flex:1;overflow-y:auto;padding:16px}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:260px;gap:10px;color:var(--muted)}
+.empty-state .ei{font-size:40px;opacity:.25}
+.empty-state p{font-size:13px}.empty-state span{font-size:11px}
+
+/* ── Execution cards ────────────────────────────────────────────────────────── */
+.xcard{background:var(--card);border:1.5px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .3s}
+.xcard.running{border-color:var(--purple);animation:cpulse 3s ease-in-out infinite}
+.xcard.completed{border-color:#166534}
+.xcard.failed{border-color:#7f1d1d}
+@keyframes cpulse{0%,100%{box-shadow:0 0 12px #7c6aff18}50%{box-shadow:0 0 24px #7c6aff33}}
+.xcard-top{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid var(--border)}
+.sbadge{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:12px}
+.sb-running{background:#1e1b4b;color:#a78bfa;border:1px solid #3730a3}
+.sb-completed{background:#14532d44;color:var(--green);border:1px solid #166534}
+.sb-failed{background:#450a0a44;color:var(--red);border:1px solid #7f1d1d}
+.sb-pending{background:#1c1917;color:#a8a29e;border:1px solid #292524}
+.spin{animation:spin .8s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.xcard-name{font-size:11px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xcard-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:2px 4px;border-radius:3px}
+.xcard-del:hover{color:var(--red)}
+.xcard-body{padding:12px;flex:1}
+.xstep{font-size:12px;font-weight:600;margin-bottom:8px;min-height:18px;display:flex;align-items:center;gap:5px;color:var(--sub)}
+.xstep b{color:var(--text)}
+.step-bar{display:flex;align-items:center;gap:0;height:6px;border-radius:3px;overflow:hidden;background:var(--border);margin-bottom:6px}
+.step-seg{height:100%;transition:width .4s,background .4s}
+.seg-done{background:var(--purple)}
+.seg-fail{background:var(--red)}
+.seg-remain{background:transparent}
+.xcard-foot{padding:8px 12px;border-top:1px solid var(--border);font-size:10px;color:var(--muted);font-family:monospace;display:flex;justify-content:space-between}
+.trigger-tag{font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:6px;background:#1e2438;color:var(--sub)}
+
+/* ── Event Feed ─────────────────────────────────────────────────────────────── */
+.feed-head{padding:12px 14px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--sub);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+.feed-scroll{flex:1;overflow-y:auto}
+.feed-item{padding:9px 14px;border-bottom:1px solid #0d1120;font-size:11px;cursor:default}
+.feed-item:hover{background:#ffffff06}
+.feed-ts{color:var(--muted);font-family:monospace;font-size:10px}
+.feed-wf{color:#a78bfa;font-size:10px;font-family:monospace;display:block;margin:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feed-body{color:var(--sub);margin-top:1px;font-size:11px}
+.feed-empty{padding:32px 14px;text-align:center;color:var(--muted);font-size:11px}
+.fc-running{color:var(--purple)} .fc-completed{color:var(--green)} .fc-failed{color:var(--red)} .fc-pending{color:var(--sub)}
+
+/* ── Builder Overlay ────────────────────────────────────────────────────────── */
+.overlay{position:fixed;inset:0;background:#00000099;z-index:100;display:none;justify-content:flex-end}
+.overlay.open{display:flex}
+.drawer{width:480px;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100vh;overflow:hidden;animation:slidein .2s ease-out}
+@keyframes slidein{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
+.drawer-head{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.drawer-head h2{font-size:14px;font-weight:700}
+.drawer-body{flex:1;overflow-y:auto;padding:18px}
+.drawer-foot{padding:14px 18px;border-top:1px solid var(--border);display:flex;gap:10px;flex-shrink:0}
+
+/* ── Form ──────────────────────────────────────────────────────────────────── */
+.section{margin-bottom:18px}
+.section-label{font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--sub);text-transform:uppercase;margin-bottom:8px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--sub);margin-bottom:4px}
+.field input,.field select,.field textarea{width:100%;background:#070a12;border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none;transition:border-color .15s;font-family:inherit}
+.field textarea{resize:vertical;min-height:70px;font-family:'Courier New',monospace;font-size:11px}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--purple)}
+.field input::placeholder,.field textarea::placeholder{color:var(--muted)}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.field-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.divider{border:none;border-top:1px solid var(--border);margin:14px 0}
+
+/* ── Trigger selector ──────────────────────────────────────────────────────── */
+.trigger-tabs{display:flex;gap:4px;margin-bottom:10px}
+.ttab{padding:5px 12px;border-radius:6px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:var(--card);color:var(--sub);transition:all .15s}
+.ttab.active{background:#1e1b4b;border-color:#3730a3;color:#a78bfa}
+
+/* ── Steps ─────────────────────────────────────────────────────────────────── */
+.steps-area{display:flex;flex-direction:column;gap:8px}
+.step-card{background:var(--card);border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.step-card-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0c0f1c;cursor:pointer;user-select:none}
+.step-num{font-size:9px;font-weight:800;letter-spacing:.4px;color:var(--muted)}
+.step-type-badge{font-size:10px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:8px}
+.st-webhook{background:#1e3a5f;color:var(--blue)}.st-condition{background:#3b1f6b;color:#c084fc}.st-wait{background:#1c2020;color:var(--cyan)}.st-skill{background:#2d1a0e;color:var(--amber)}.st-transform{background:#1a2e1a;color:var(--green)}.st-log{background:#1e2438;color:var(--sub)}
+.step-id-preview{font-size:11px;color:var(--sub);flex:1;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step-toggle{font-size:11px;color:var(--muted);margin-left:auto}
+.step-card-body{padding:12px;display:none}
+.step-card-body.open{display:block}
+
+/* ── Templates ─────────────────────────────────────────────────────────────── */
+.tpl-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:4px}
+.tpl-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:9px 11px;cursor:pointer;transition:all .15s}
+.tpl-card:hover{border-color:var(--purple);background:#131827}
+.tpl-name{font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px}
+.tpl-desc{font-size:10px;color:var(--dim)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="live-dot"></div>
+  <h1>Workflow Automation</h1>
+  <span class="badge">AURA</span>
+  <div class="hstats">
+    <div class="hstat blue"><b id="s-total">0</b>&nbsp;Total</div>
+    <div class="hstat amber"><b id="s-run">0</b>&nbsp;Running</div>
+    <div class="hstat green"><b id="s-ok">0</b>&nbsp;Done</div>
+    <div class="hstat red"><b id="s-fail">0</b>&nbsp;Failed</div>
+  </div>
+  <button class="btn btn-primary" style="margin-left:14px" onclick="openBuilder()">+ New Workflow</button>
+</header>
+
+<div class="layout">
+
+  <!-- ── Left: Definitions ───────────────────────────────────────────────── -->
+  <div class="sidebar">
+    <div class="sb-head">
+      <span>Workflows</span>
+      <button class="btn btn-ghost btn-sm" onclick="loadDefs()">↻</button>
+    </div>
+    <div class="def-list" id="def-list">
+      <div class="def-empty">No workflows saved yet.<br>Click <b>+ New Workflow</b> to create one.</div>
+    </div>
+  </div>
+
+  <!-- ── Center: Executions ──────────────────────────────────────────────── -->
+  <div class="main">
+    <div class="board-head">
+      <span class="board-title">Executions</span>
+      <button class="btn btn-ghost btn-sm" onclick="load()">↻ Refresh</button>
+      <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="clearBoard()">Clear</button>
+    </div>
+    <div class="board-scroll">
+      <div class="card-grid" id="card-grid">
+        <div class="empty-state" id="empty-msg">
+          <div class="ei">⚙</div>
+          <p>No executions yet</p>
+          <span>Select a workflow and click ▶ Run, or trigger via webhook</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right: Event Feed ───────────────────────────────────────────────── -->
+  <div class="sidebar-right">
+    <div class="feed-head">
+      <span>Live Events</span>
+      <span id="feed-cnt" style="color:var(--muted);font-weight:400"></span>
+    </div>
+    <div class="feed-scroll" id="feed-scroll">
+      <div class="feed-empty">Waiting for events…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Builder Drawer ──────────────────────────────────────────────────────── -->
+<div class="overlay" id="overlay" onclick="overlayClick(event)">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h2 id="drawer-title">New Workflow</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeBuilder()">✕</button>
+    </div>
+    <div class="drawer-body">
+
+      <!-- Templates -->
+      <div class="section">
+        <div class="section-label">Quick Templates</div>
+        <div class="tpl-grid" id="tpl-grid"></div>
+      </div>
+      <hr class="divider">
+
+      <!-- Meta -->
+      <div class="section">
+        <div class="section-label">Workflow</div>
+        <div class="field"><label>Name</label><input id="wf-name" type="text" placeholder="my-workflow"></div>
+        <div class="field"><label>Description</label><input id="wf-desc" type="text" placeholder="What does this workflow do?"></div>
+      </div>
+
+      <!-- Trigger -->
+      <div class="section">
+        <div class="section-label">Trigger</div>
+        <div class="trigger-tabs">
+          <div class="ttab active" onclick="setTrigger('manual',this)">Manual</div>
+          <div class="ttab" onclick="setTrigger('webhook',this)">Webhook</div>
+          <div class="ttab" onclick="setTrigger('schedule',this)">Schedule</div>
+        </div>
+        <div id="trigger-webhook" style="display:none">
+          <div class="field"><label>Webhook Key</label><input id="wh-key" type="text" placeholder="my-alerts"></div>
+        </div>
+        <div id="trigger-schedule" style="display:none">
+          <div class="field"><label>Cron Expression</label><input id="cron-expr" type="text" placeholder="0 9 * * 1-5"></div>
+          <div style="font-size:10px;color:var(--dim);margin-top:-6px">minute hour day month weekday · e.g. "*/30 * * * *" = every 30 min</div>
+        </div>
+      </div>
+      <hr class="divider">
+
+      <!-- Steps -->
+      <div class="section">
+        <div class="section-label" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Steps</span>
+          <button class="btn btn-ghost btn-sm" onclick="addStep()">+ Add Step</button>
+        </div>
+        <div class="steps-area" id="steps-area"></div>
+      </div>
+    </div>
+    <div class="drawer-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="saveOnly()">💾 Save</button>
+      <button class="btn btn-success" style="flex:1" onclick="saveAndRun()">▶ Save & Run</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let steps = [];
+let triggerType = 'manual';
+let editingName = null; // null = new, string = edit existing
+
+const STEP_TYPES = ['webhook', 'condition', 'wait', 'skill', 'transform', 'log'];
+const TYPE_ICONS = { webhook:'🔗', condition:'⑂', wait:'⏱', skill:'🧠', transform:'⇄', log:'📝' };
+const TYPE_COLORS = { webhook:'st-webhook', condition:'st-condition', wait:'st-wait', skill:'st-skill', transform:'st-transform', log:'st-log' };
+
+// ── Trigger ───────────────────────────────────────────────────────────────────
+function setTrigger(type, el) {
+  triggerType = type;
+  document.querySelectorAll('.ttab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('trigger-webhook').style.display  = type === 'webhook'  ? '' : 'none';
+  document.getElementById('trigger-schedule').style.display = type === 'schedule' ? '' : 'none';
+}
+
+// ── Steps ─────────────────────────────────────────────────────────────────────
+function addStep(preset = null) {
+  const idx = steps.length;
+  const s = preset ?? {
+    id: `step${idx + 1}`,
+    type: 'webhook',
+    // webhook defaults
+    url: '', method: 'POST', payload: '{}', headers: '{}', allow_failure: false,
+    timeout_ms: 15000, on_success: '', on_failure: '',
+    retry: { max_attempts: 1, delay_ms: 1000 },
+    // condition
+    condition: { field: 'payload.value', operator: 'eq', value: '' }, on_true: '', on_false: '',
+    // wait
+    duration_ms: 2000,
+    // skill
+    skill_name: '', tool_name: '', params: '{}',
+    // transform
+    mappings: '{}',
+    // log
+    message: '',
+  };
+  steps.push(s);
+  renderSteps();
+  // Expand new step
+  const body = document.getElementById(`sbody-${idx}`);
+  if (body) body.classList.add('open');
+}
+
+function removeStep(i) {
+  steps.splice(i, 1);
+  renderSteps();
+}
+
+function toggleStep(i) {
+  const body = document.getElementById(`sbody-${i}`);
+  body?.classList.toggle('open');
+  const tog = document.getElementById(`stog-${i}`);
+  if (tog) tog.textContent = body?.classList.contains('open') ? '▲' : '▼';
+}
+
+function changeType(i, type) {
+  steps[i].type = type;
+  renderSteps();
+  document.getElementById(`sbody-${i}`)?.classList.add('open');
+}
+
+function renderSteps() {
+  const area = document.getElementById('steps-area');
+  if (!steps.length) { area.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:11px;padding:12px">No steps yet. Click + Add Step.</div>'; return; }
+  area.innerHTML = steps.map((s, i) => {
+    const typeOpts = STEP_TYPES.map(t => `<option value="${t}" ${t===s.type?'selected':''}>${t}</option>`).join('');
+    return `
+    <div class="step-card">
+      <div class="step-card-head" onclick="toggleStep(${i})">
+        <span class="step-num">STEP ${i+1}</span>
+        <span class="step-type-badge ${TYPE_COLORS[s.type]}">${TYPE_ICONS[s.type]} ${s.type}</span>
+        <span class="step-id-preview">${s.id}</span>
+        <button class="icon-btn danger" onclick="event.stopPropagation();removeStep(${i})">✕</button>
+        <span id="stog-${i}" class="step-toggle">▼</span>
+      </div>
+      <div class="step-card-body" id="sbody-${i}">
+        <div class="field-row">
+          <div class="field"><label>Step ID</label><input value="${s.id}" oninput="steps[${i}].id=this.value;updateStepPreview(${i})"></div>
+          <div class="field"><label>Type</label><select onchange="changeType(${i},this.value)">${typeOpts}</select></div>
+        </div>
+        ${renderStepFields(s, i)}
+        <hr style="border:none;border-top:1px solid var(--border);margin:10px 0">
+        <div class="field-row">
+          <div class="field"><label>On Success →</label><input value="${s.on_success??''}" placeholder="next step id or end" oninput="steps[${i}].on_success=this.value"></div>
+          <div class="field"><label>On Failure →</label><input value="${s.on_failure??''}" placeholder="step id (optional)" oninput="steps[${i}].on_failure=this.value"></div>
+        </div>
+        <details style="margin-top:4px">
+          <summary style="font-size:10px;color:var(--dim);cursor:pointer">Retry options</summary>
+          <div class="field-row" style="margin-top:8px">
+            <div class="field"><label>Max Attempts</label><input type="number" min="1" max="10" value="${s.retry?.max_attempts??1}" oninput="steps[${i}].retry={...steps[${i}].retry,max_attempts:+this.value}"></div>
+            <div class="field"><label>Delay (ms)</label><input type="number" min="100" value="${s.retry?.delay_ms??1000}" oninput="steps[${i}].retry={...steps[${i}].retry,delay_ms:+this.value}"></div>
+          </div>
+        </details>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateStepPreview(i) {
+  const el = document.querySelector(`#sbody-${i}`)?.parentElement?.querySelector('.step-id-preview');
+  if (el) el.textContent = steps[i].id;
+}
+
+function renderStepFields(s, i) {
+  if (s.type === 'webhook') return `
+    <div class="field"><label>URL</label><input value="${s.url??''}" placeholder="https://..." oninput="steps[${i}].url=this.value"></div>
+    <div class="field-row">
+      <div class="field"><label>Method</label><select onchange="steps[${i}].method=this.value">
+        ${['POST','GET','PUT','PATCH','DELETE'].map(m=>`<option ${m===s.method?'selected':''}>${m}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Timeout (ms)</label><input type="number" value="${s.timeout_ms??15000}" oninput="steps[${i}].timeout_ms=+this.value"></div>
+    </div>
+    <div class="field"><label>Payload JSON  <span style="color:var(--dim)">(supports {{templates}})</span></label><textarea placeholder='{"key":"{{payload.value}}"}'  oninput="steps[${i}].payload=this.value">${s.payload??'{}'}</textarea></div>
+    <div class="field"><label>Headers JSON (optional)</label><textarea placeholder='{"Authorization":"Bearer {{env.token}}"}'  oninput="steps[${i}].headers=this.value">${s.headers??'{}'}</textarea></div>
+    <label style="font-size:10px;color:var(--sub);display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" ${s.allow_failure?'checked':''} onchange="steps[${i}].allow_failure=this.checked"> Allow failure (continue on non-2xx)</label>`;
+
+  if (s.type === 'condition') return `
+    <div class="field"><label>Field (dot-path)</label><input value="${s.condition?.field??'payload.value'}" placeholder="payload.status or steps.fetch.output.code" oninput="steps[${i}].condition={...steps[${i}].condition,field:this.value}"></div>
+    <div class="field-row">
+      <div class="field"><label>Operator</label><select onchange="steps[${i}].condition={...steps[${i}].condition,operator:this.value}">
+        ${['eq','ne','gt','lt','gte','lte','contains','exists','not_exists'].map(op=>`<option ${op===(s.condition?.operator??'eq')?'selected':''}>${op}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Value</label><input value="${s.condition?.value??''}" placeholder="compare value" oninput="steps[${i}].condition={...steps[${i}].condition,value:this.value}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>If True → Step</label><input value="${s.on_true??''}" placeholder="step id" oninput="steps[${i}].on_true=this.value"></div>
+      <div class="field"><label>If False → Step</label><input value="${s.on_false??''}" placeholder="step id" oninput="steps[${i}].on_false=this.value"></div>
+    </div>`;
+
+  if (s.type === 'wait') return `
+    <div class="field"><label>Duration (ms) <span style="color:var(--dim)">supports {{templates}}</span></label>
+    <input value="${s.duration_ms??2000}" placeholder="2000" oninput="steps[${i}].duration_ms=this.value">
+    </div>`;
+
+  if (s.type === 'skill') return `
+    <div class="field-row">
+      <div class="field"><label>Skill Name</label><input value="${s.skill_name??''}" placeholder="web_search" oninput="steps[${i}].skill_name=this.value"></div>
+      <div class="field"><label>Tool Name</label><input value="${s.tool_name??''}" placeholder="search" oninput="steps[${i}].tool_name=this.value"></div>
+    </div>
+    <div class="field"><label>Params JSON <span style="color:var(--dim)">(supports {{templates}})</span></label><textarea oninput="steps[${i}].params=this.value" placeholder='{"query":"{{payload.query}}"}'>${s.params??'{}'}</textarea></div>
+    <div class="field"><label>Timeout (ms)</label><input type="number" value="${s.timeout_ms??60000}" oninput="steps[${i}].timeout_ms=+this.value"></div>`;
+
+  if (s.type === 'transform') return `
+    <div class="field"><label>Mappings JSON <span style="color:var(--dim)">(outputKey: "{{template}}")</span></label>
+    <textarea oninput="steps[${i}].mappings=this.value" placeholder='{"message":"{{steps.prev.output.body}}","ts":"{{env.started_at}}"}'>${s.mappings??'{}'}</textarea></div>`;
+
+  if (s.type === 'log') return `
+    <div class="field"><label>Message <span style="color:var(--dim)">(supports {{templates}})</span></label>
+    <input value="${s.message??''}" placeholder="Step completed: {{payload.id}}" oninput="steps[${i}].message=this.value"></div>`;
+
+  return '';
+}
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+async function loadTemplates() {
+  try {
+    const r = await fetch('/dashboard3/api/templates');
+    const tpls = await r.json();
+    document.getElementById('tpl-grid').innerHTML = tpls.map(t => `
+      <div class="tpl-card" onclick='applyTemplate(${JSON.stringify(t)})'>
+        <div class="tpl-name">${t.name}</div>
+        <div class="tpl-desc">${t.description}</div>
+      </div>`).join('');
+  } catch { document.getElementById('tpl-grid').innerHTML = '<span style="color:var(--muted);font-size:10px">Could not load templates</span>'; }
+}
+
+function applyTemplate(tpl) {
+  editingName = null;
+  document.getElementById('drawer-title').textContent = 'New Workflow (from template)';
+  const def = tpl.definition;
+  document.getElementById('wf-name').value = def.name ?? tpl.name;
+  document.getElementById('wf-desc').value = def.description ?? '';
+  const trigType = def.trigger?.type ?? 'manual';
+  setTrigger(trigType, document.querySelectorAll('.ttab')[['manual','webhook','schedule'].indexOf(trigType)] || document.querySelectorAll('.ttab')[0]);
+  if (def.trigger?.webhook_key) document.getElementById('wh-key').value = def.trigger.webhook_key;
+  if (def.trigger?.schedule)    document.getElementById('cron-expr').value = def.trigger.schedule;
+
+  steps = (def.steps ?? []).map(s => ({
+    id: s.id, type: s.type,
+    url: s.url ?? '', method: s.method ?? 'POST',
+    payload: typeof s.payload === 'string' ? s.payload : JSON.stringify(s.payload ?? {}),
+    headers: typeof s.headers === 'string' ? s.headers : JSON.stringify(s.headers ?? {}),
+    allow_failure: s.allow_failure ?? false, timeout_ms: s.timeout_ms ?? 15000,
+    condition: s.condition ?? { field: 'payload.value', operator: 'eq', value: '' },
+    on_true: s.on_true ?? '', on_false: s.on_false ?? '',
+    duration_ms: s.duration_ms ?? 2000,
+    skill_name: s.skill_name ?? '', tool_name: s.tool_name ?? '',
+    params: typeof s.params === 'string' ? s.params : JSON.stringify(s.params ?? {}),
+    mappings: typeof s.mappings === 'string' ? s.mappings : JSON.stringify(s.mappings ?? {}),
+    message: s.message ?? '',
+    on_success: s.on_success ?? '', on_failure: s.on_failure ?? '',
+    retry: s.retry ?? { max_attempts: 1, delay_ms: 1000 },
+  }));
+  renderSteps();
+}
+
+// ── Build definition object from form ─────────────────────────────────────────
+function buildDefinition() {
+  const name = document.getElementById('wf-name').value.trim() || 'my-workflow';
+  const desc = document.getElementById('wf-desc').value.trim();
+  let trigger = { type: triggerType };
+  if (triggerType === 'webhook')  trigger = { ...trigger, webhook_key: document.getElementById('wh-key').value.trim() };
+  if (triggerType === 'schedule') trigger = { ...trigger, schedule: document.getElementById('cron-expr').value.trim() };
+
+  const builtSteps = steps.map(s => {
+    const base = { id: s.id, type: s.type };
+    const retry = s.retry?.max_attempts > 1 ? { retry: s.retry } : {};
+    const chain = {};
+    if (s.on_success) chain.on_success = s.on_success;
+    if (s.on_failure) chain.on_failure = s.on_failure;
+
+    if (s.type === 'webhook') {
+      let payload = {}, headers = {};
+      try { payload = JSON.parse(s.payload || '{}'); } catch { payload = s.payload; }
+      try { headers = JSON.parse(s.headers || '{}'); } catch {}
+      return { ...base, url: s.url, method: s.method, payload, ...(Object.keys(headers).length ? {headers} : {}), allow_failure: s.allow_failure||undefined, timeout_ms: s.timeout_ms, ...chain, ...retry };
+    }
+    if (s.type === 'condition') return { ...base, condition: s.condition, on_true: s.on_true, on_false: s.on_false };
+    if (s.type === 'wait')      return { ...base, duration_ms: +s.duration_ms, ...chain };
+    if (s.type === 'skill') {
+      let params = {};
+      try { params = JSON.parse(s.params || '{}'); } catch { params = s.params; }
+      return { ...base, skill_name: s.skill_name, tool_name: s.tool_name, params, timeout_ms: s.timeout_ms, ...chain, ...retry };
+    }
+    if (s.type === 'transform') {
+      let mappings = {};
+      try { mappings = JSON.parse(s.mappings || '{}'); } catch { mappings = s.mappings; }
+      return { ...base, mappings, ...chain };
+    }
+    if (s.type === 'log')  return { ...base, message: s.message, ...chain };
+    return { ...base, ...chain };
+  });
+
+  return { name, definition: { name, description: desc, trigger, steps: builtSteps } };
+}
+
+async function saveOnly() {
+  const { name, definition } = buildDefinition();
+  await fetch('/dashboard3/api/definitions', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, definition }) });
+  closeBuilder();
+  loadDefs();
+}
+
+async function saveAndRun() {
+  const { name, definition } = buildDefinition();
+  await fetch('/dashboard3/api/definitions', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, definition }) });
+  closeBuilder();
+  loadDefs();
+  runWorkflow(name);
+}
+
+// ── Drawer ────────────────────────────────────────────────────────────────────
+function openBuilder(existing = null) {
+  editingName = existing;
+  steps = [];
+  document.getElementById('wf-name').value = '';
+  document.getElementById('wf-desc').value = '';
+  document.getElementById('wh-key').value = '';
+  document.getElementById('cron-expr').value = '';
+  document.getElementById('steps-area').innerHTML = '';
+  document.getElementById('drawer-title').textContent = existing ? `Edit: ${existing}` : 'New Workflow';
+  setTrigger('manual', document.querySelectorAll('.ttab')[0]);
+  document.getElementById('overlay').classList.add('open');
+  loadTemplates();
+  if (!existing) addStep();
+}
+
+function closeBuilder() { document.getElementById('overlay').classList.remove('open'); }
+function overlayClick(e) { if (e.target === document.getElementById('overlay')) closeBuilder(); }
+
+// ── Definitions list ─────────────────────────────────────────────────────────
+async function loadDefs() {
+  try {
+    const r = await fetch('/dashboard3/api/definitions');
+    const { definitions } = await r.json();
+    const el = document.getElementById('def-list');
+    if (!definitions?.length) {
+      el.innerHTML = '<div class="def-empty">No workflows saved yet.<br>Click <b>+ New Workflow</b> to start.</div>';
+      return;
+    }
+    el.innerHTML = definitions.map(d => {
+      const icon = d.trigger === 'webhook' ? '🔗' : d.trigger === 'schedule' ? '🕐' : '▶';
+      const tc   = d.trigger === 'webhook' ? 't-webhook' : d.trigger === 'schedule' ? 't-schedule' : 't-manual';
+      return `
+      <div class="def-item" id="def-${d.name}">
+        <div class="def-icon">${icon}</div>
+        <div class="def-info">
+          <div class="def-name">${d.name}</div>
+          <div class="def-meta">${d.steps} step${d.steps!==1?'s':''} · <span class="trigger-chip ${tc}">${d.trigger}</span></div>
+          ${d.description ? `<div class="def-meta" style="margin-top:2px;opacity:.6">${d.description.slice(0,60)}</div>` : ''}
+        </div>
+        <div class="def-actions">
+          <button class="icon-btn" title="Run" onclick="runWorkflow('${d.name}')">▶</button>
+          <button class="icon-btn danger" title="Delete" onclick="deleteDef('${d.name}')">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function deleteDef(name) {
+  if (!confirm(`Delete workflow "${name}"?`)) return;
+  await fetch(`/dashboard3/api/definitions/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  loadDefs();
+}
+
+async function runWorkflow(name, payload = {}) {
+  try {
+    await fetch('/dashboard3/api/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, payload }) });
+    setTimeout(load, 800);
+  } catch(e) { alert('Failed to run: ' + e); }
+}
+
+// ── Execution board ───────────────────────────────────────────────────────────
+function statusBadge(s) {
+  const map = {
+    running:   ['sb-running',  `<span class="spin">⟳</span> RUNNING`],
+    completed: ['sb-completed','✓ DONE'],
+    failed:    ['sb-failed',   '✗ FAILED'],
+    pending:   ['sb-pending',  '◌ PENDING'],
+  };
+  const [cls, label] = map[s] || ['sb-pending', s.toUpperCase()];
+  return `<span class="sbadge ${cls}">${label}</span>`;
+}
+
+function renderCard(e) {
+  const done = (() => { try { return JSON.parse(e.steps_done || '[]').length; } catch { return 0; } })();
+  const ts   = e.updated_at ? new Date(e.updated_at).toLocaleTimeString() : '';
+  const pct  = done > 0 ? Math.min(100, done * 20) : (e.status === 'completed' ? 100 : 5);
+  const barColor = e.status === 'failed' ? 'var(--red)' : 'var(--purple)';
+  return `
+  <div class="xcard ${e.status}">
+    <div class="xcard-top">
+      ${statusBadge(e.status)}
+      <span class="xcard-name">${e.workflow_name}</span>
+      <button class="xcard-del" onclick="clearExec('${e.id}')">✕</button>
+    </div>
+    <div class="xcard-body">
+      <div class="xstep">${e.status==='completed' ? '✓ <b>Completed</b>' : e.status==='failed' ? `✗ <b>Failed</b>` : `<b>${done}</b> step${done!==1?'s':''} done`}
+        ${e.status==='failed' && e.error ? `<span style="color:var(--red);font-size:10px" title="${e.error}">${e.error.slice(0,30)}…</span>` : ''}
+      </div>
+      <div class="step-bar"><div class="step-seg" style="width:${pct}%;background:${barColor}"></div></div>
+    </div>
+    <div class="xcard-foot">
+      <span class="trigger-tag">${e.trigger_type ?? 'manual'}</span>
+      <span>${ts}</span>
+    </div>
+  </div>`;
+}
+
+async function clearExec(id) {
+  await fetch(`/dashboard3/api/executions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  load();
+}
+
+async function clearBoard() {
+  const r = await fetch('/dashboard3/api/executions');
+  const { executions } = await r.json();
+  await Promise.all(executions.map(e => fetch(`/dashboard3/api/executions/${encodeURIComponent(e.id)}`, { method: 'DELETE' })));
+  load();
+}
+
+// ── Feed ──────────────────────────────────────────────────────────────────────
+function renderFeed(events) {
+  const feed = document.getElementById('feed-scroll');
+  document.getElementById('feed-cnt').textContent = events.length ? `(${events.length})` : '';
+  if (!events.length) { feed.innerHTML = '<div class="feed-empty">Waiting for events…</div>'; return; }
+  feed.innerHTML = events.slice(0, 60).map(ev => {
+    const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '';
+    const d  = ev.data ?? {};
+    const detail = d.error ? d.error.slice(0,50) : (d.step ? `step: ${d.step}` : '');
+    return `<div class="feed-item">
+      <span class="feed-ts">${ts}</span>
+      <span class="feed-wf">${ev.workflow_name ?? ev.execution_id}</span>
+      <div class="feed-body"><span class="fc-${ev.status}">${ev.status}</span>${detail ? ' — ' + detail : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Main polling loop ─────────────────────────────────────────────────────────
+async function load() {
+  try {
+    const r = await fetch('/dashboard3/api/executions');
+    if (!r.ok) return;
+    const { executions, events, stats } = await r.json();
+
+    document.getElementById('s-total').textContent = stats.total;
+    document.getElementById('s-run').textContent   = stats.running;
+    document.getElementById('s-ok').textContent    = stats.completed;
+    document.getElementById('s-fail').textContent  = stats.failed;
+
+    const grid  = document.getElementById('card-grid');
+    const empty = document.getElementById('empty-msg');
+    if (!executions?.length) {
+      grid.innerHTML = '';
+      grid.appendChild(empty);
+      empty.style.display = 'flex';
+    } else {
+      empty.style.display = 'none';
+      grid.innerHTML = executions.map(renderCard).join('');
+    }
+
+    renderFeed(events ?? []);
+  } catch(e) { console.error(e); }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadDefs();
+load();
+setInterval(() => { load(); loadDefs(); }, 3000);
+</script>
+</body>
+</html>

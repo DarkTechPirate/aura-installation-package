@@ -1,0 +1,32 @@
+name: webhooks
+version: 1.0.0
+description: Send webhooks to external services and read incoming webhook payloads
+executor: webhooks.ts
+enabled: true
+source: human
+requires_env: []
+tools:
+  - name: webhook_send
+    description: Send an HTTP webhook/POST to an external URL
+    parameters:
+      type: object
+      properties:
+        url: { type: string, description: Target URL }
+        payload: { type: object, description: JSON payload to send }
+        method: { type: string, description: "HTTP method (default: POST)" }
+      required: [url, payload]
+  - name: webhook_list_received
+    description: List recently received payloads on a webhook key
+    parameters:
+      type: object
+      properties:
+        key: { type: string, description: Webhook key }
+        limit: { type: number, description: Max results (default 20) }
+      required: [key]
+  - name: webhook_clear
+    description: Clear all received payloads for a webhook key
+    parameters:
+      type: object
+      properties:
+        key: { type: string, description: Webhook key }
+      required: [key]

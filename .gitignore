@@ -1,0 +1,47 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build output ───────────────────────────────────────────────────────────────
+dist/
+build/
+*.tsbuildinfo
+
+# ── Environment & secrets (NEVER commit these) ────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+
+# ── Personal agent config (contains real chat IDs, personal preferences) ──────
+agents.yaml
+
+# ── Agent runtime data (personal data, memories, contacts) ───────────────────
+workspace/
+*.aura/
+
+# ── Archives & binaries ───────────────────────────────────────────────────────
+*.zip
+*.tar.gz
+*.tar
+*.gz
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Test coverage ──────────────────────────────────────────────────────────────
+coverage/
+.vitest/

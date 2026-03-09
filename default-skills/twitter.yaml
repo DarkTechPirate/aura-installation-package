@@ -1,0 +1,44 @@
+name: twitter
+version: 1.0.0
+description: Post and read Twitter/X content
+executor: twitter.ts
+enabled: true
+source: human
+requires_env: [TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]
+tools:
+  - name: twitter_post
+    description: Post a tweet (max 280 chars)
+    parameters:
+      type: object
+      properties:
+        text: { type: string, description: Tweet text (max 280 chars) }
+      required: [text]
+  - name: twitter_thread
+    description: Post a Twitter thread
+    parameters:
+      type: object
+      properties:
+        tweets: { type: array, items: { type: string }, description: Array of tweet texts }
+      required: [tweets]
+  - name: twitter_reply
+    description: Reply to a tweet
+    parameters:
+      type: object
+      properties:
+        tweet_id: { type: string, description: Tweet ID to reply to }
+        text: { type: string, description: Reply text }
+      required: [tweet_id, text]
+  - name: twitter_search
+    description: Search tweets
+    parameters:
+      type: object
+      properties:
+        query: { type: string, description: Search query }
+        count: { type: number, description: Number of results (default 10) }
+      required: [query]
+  - name: twitter_get_timeline
+    description: Get your Twitter home timeline
+    parameters:
+      type: object
+      properties:
+        count: { type: number, description: Number of tweets (default 20) }

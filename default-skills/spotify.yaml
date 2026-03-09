@@ -1,0 +1,44 @@
+name: spotify
+version: 1.0.0
+description: Control Spotify playback
+executor: spotify.ts
+enabled: true
+source: human
+requires_env: [SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET]
+tools:
+  - name: spotify_play
+    description: Start or resume Spotify playback
+    parameters:
+      type: object
+      properties:
+        uri: { type: string, description: "Spotify URI to play (optional)" }
+  - name: spotify_pause
+    description: Pause Spotify playback
+    parameters:
+      type: object
+      properties: {}
+  - name: spotify_next
+    description: Skip to next track
+    parameters:
+      type: object
+      properties: {}
+  - name: spotify_search
+    description: Search for tracks, albums, or artists on Spotify
+    parameters:
+      type: object
+      properties:
+        query: { type: string, description: Search query }
+        type: { type: string, description: "Type: track, album, artist (default: track)" }
+      required: [query]
+  - name: spotify_current
+    description: Get the currently playing track
+    parameters:
+      type: object
+      properties: {}
+  - name: spotify_volume
+    description: Set Spotify volume
+    parameters:
+      type: object
+      properties:
+        percent: { type: number, description: "Volume 0-100" }
+      required: [percent]

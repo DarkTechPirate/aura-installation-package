@@ -1,0 +1,147 @@
+name: forex
+version: 1.1.0
+description: >
+  GOLD (XAU/USD), SILVER (XAG/USD), and FOREX trading via OANDA. DO NOT use for US stocks
+  or crypto — use the trading skill for those. Covers all major/minor/exotic currency pairs.
+  Risk management: 2% per trade, 5% daily loss halt, max 8 trades. Practice account by default.
+  SETUP: Before first use, check env_list for OANDA_API_TOKEN and OANDA_ACCOUNT_ID.
+  If NOT SET, ask the user for their OANDA API token and account ID, then use env_set to save them.
+  Free practice account at oanda.com — no credit card needed.
+executor: forex.ts
+enabled: true
+source: human
+requires_env: [OANDA_API_TOKEN, OANDA_ACCOUNT_ID]
+tools:
+  - name: forex_account
+    description: >
+      Get OANDA account balance, NAV, margin, and P&L (for forex/gold/silver).
+      For US stock account use get_account instead.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: forex_positions
+    description: List all open forex/metals trades with entry price, SL, TP, and unrealised P&L.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: forex_orders
+    description: List all pending limit/stop orders.
+    parameters:
+      type: object
+      properties: {}
+
+  - name: forex_quote
+    description: Get the current bid/ask/mid price and spread for any forex pair or metal.
+    parameters:
+      type: object
+      properties:
+        instrument:
+          type: string
+          description: >
+            Instrument name. Accepts formats like XAUUSD, XAU_USD, EURUSD, EUR_USD,
+            GBPJPY, USDJPY. Gold = XAU_USD, Silver = XAG_USD.
+      required: [instrument]
+
+  - name: forex_analysis
+    description: >
+      Run full technical analysis (RSI, MACD, EMA20/50, Bollinger Bands, volume)
+      on any forex pair or metal. Returns trend, signal, score, and key reasons.
+      Always run this before placing a trade.
+    parameters:
+      type: object
+      properties:
+        instrument:
+          type: string
+          description: "Instrument name (e.g. XAU_USD, EUR_USD, GBP_USD)"
+        granularity:
+          type: string
+          description: "Candle timeframe: S5, M1, M5, M15, M30, H1, H4, D (default: D)"
+      required: [instrument]
+
+  - name: forex_trade
+    description: >
+      Place a buy or sell trade on any forex pair or metal.
+      Stop-loss and take-profit are auto-calculated (0.5% SL for gold, 30 pips for forex).
+      Position size is auto-calculated to risk at most 2% of balance.
+      Risk checks run automatically before execution.
+    parameters:
+      type: object
+      properties:
+        instrument:
+          type: string
+          description: "e.g. XAU_USD (gold), EUR_USD, GBP_JPY, XAG_USD (silver)"
+        side:
+          type: string
+          description: "buy or sell"
+        units:
+          type: number
+          description: "Number of units (auto-calculated from risk if omitted). For gold, 1 unit = 1 troy oz."
+        type:
+          type: string
+          description: "market (default) or limit"
+        limit_price:
+          type: number
+          description: "Entry price for limit orders"
+        stop_loss:
+          type: number
+          description: "Stop-loss price (auto-calculated if omitted)"
+        take_profit:
+          type: number
+          description: "Take-profit price (auto-calculated if omitted)"
+      required: [instrument, side]
+
+  - name: forex_close
+    description: Close an open trade fully or partially.
+    parameters:
+      type: object
+      properties:
+        trade_id:
+          type: string
+          description: "Trade ID from forex_positions"
+        units:
+          type: number
+          description: "Units to close (omit to close all)"
+      required: [trade_id]
+
+  - name: forex_update_sltp
+    description: Update stop-loss and/or take-profit on an open trade.
+    parameters:
+      type: object
+      properties:
+        trade_id:
+          type: string
+          description: "Trade ID from forex_positions"
+        stop_loss:
+          type: number
+          description: "New stop-loss price"
+        take_profit:
+          type: number
+          description: "New take-profit price"
+      required: [trade_id]
+
+  - name: forex_cancel
+    description: Cancel a pending limit or stop order.
+    parameters:
+      type: object
+      properties:
+        order_id:
+          type: string
+          description: "Order ID from forex_orders"
+      required: [order_id]
+
+  - name: forex_scan
+    description: >
+      Scan multiple instruments and rank by technical score. Best for finding
+      high-probability setups across gold, silver, and forex pairs.
+    parameters:
+      type: object
+      properties:
+        instruments:
+          type: array
+          items: { type: string }
+          description: >
+            List of instruments to scan, e.g.
+            ["XAU_USD", "EUR_USD", "GBP_USD", "USD_JPY", "XAG_USD"]
+      required: [instruments]

@@ -1,0 +1,30 @@
+name: home_assistant
+version: 1.0.0
+description: Control Home Assistant entities (lights, switches, sensors, etc.)
+executor: home_assistant.ts
+enabled: true
+source: human
+requires_env: [HA_URL, HA_TOKEN]
+tools:
+  - name: ha_get_state
+    description: Get the current state of a Home Assistant entity
+    parameters:
+      type: object
+      properties:
+        entity_id: { type: string, description: "Entity ID (e.g. light.living_room)" }
+      required: [entity_id]
+  - name: ha_call_service
+    description: Call a Home Assistant service to control devices
+    parameters:
+      type: object
+      properties:
+        domain: { type: string, description: "Service domain (e.g. light, switch, climate)" }
+        service: { type: string, description: "Service name (e.g. turn_on, turn_off)" }
+        data: { type: object, description: "Service data (e.g. {entity_id: 'light.living_room'})" }
+      required: [domain, service, data]
+  - name: ha_list_entities
+    description: List Home Assistant entities, optionally filtered by domain
+    parameters:
+      type: object
+      properties:
+        domain: { type: string, description: "Optional domain filter (e.g. light, switch)" }
