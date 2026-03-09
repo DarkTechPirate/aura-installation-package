@@ -26,8 +26,6 @@ import { RateLimiter } from './security/rate_limiter.js';
 import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
 
-// Channel adapters
-import { TelegramAdapter } from './channels/telegram.js';
 import type { ToolDefinition } from './llm/types.js';
 
 // ── Core skills always loaded regardless of message content ──────────────────
@@ -112,6 +110,20 @@ async function smartLoadSkills(
     }
   }
 
+  // ── Skill groups: when any member is triggered, the whole group loads ────────
+  // Add your own groups here if you have other tightly-coupled skill sets.
+  const SKILL_GROUPS: string[][] = [
+    ['forex', 'trading', 'forex_monitor', 'forex_journal'],
+  ];
+
+  function expandGroups(skills: Set<string>): void {
+    for (const group of SKILL_GROUPS) {
+      if (group.some(s => skills.has(s))) {
+        group.forEach(s => { if (agentSkillSet.has(s)) skills.add(s); });
+      }
+    }
+  }
+
   // 3a. Instrument override — financial tickers/pairs that vector search misses on short queries.
   // Leading \b only — matches xau/xausd/xauusd etc. (no trailing boundary so prefixes work)
   const FOREX_PATTERN = /\b(xau|xag|xpt|xpd|eur|gbp|jpy|aud|cad|chf|nzd|forex|oanda|gold|silver|pip\b|spread\b|currency\b)/i;
@@ -135,6 +147,9 @@ async function smartLoadSkills(
     if (agentSkillSet.has(s)) toLoad.add(s);
   }
 
+  // 3c. Expand skill groups — any triggered member pulls in the full group
+  expandGroups(toLoad);
+
   // 4. Re-add any skills already active in this session (accumulate, never drop)
   for (const s of sessionSkills) {
     if (agentSkillSet.has(s)) toLoad.add(s);
@@ -151,13 +166,6 @@ async function smartLoadSkills(
     unloadedSkillNames,
   };
 }
-import { WhatsAppAdapter } from './channels/whatsapp.js';
-import { SignalAdapter }   from './channels/signal.js';
-import { SlackAdapter }    from './channels/slack.js';
-import { DiscordAdapter }  from './channels/discord.js';
-import { GoogleChatAdapter } from './channels/google_chat.js';
-import { TeamsAdapter }    from './channels/teams.js';
-import { WebChatAdapter }  from './channels/webchat.js';
 
 import type { ANPEvent, UtterancePayload } from './anp/types.js';
 import type { LLMMessage, ToolCall } from './llm/types.js';
@@ -294,25 +302,25 @@ async function main(): Promise<void> {
   await anpServer.start();
 
   // ── Channel Manager ───────────────────────────────────────────────────────
-  const webchatAdapter = new WebChatAdapter();
-  webchatAdapter.setMeta(
-    config.canvas.port            ?? 3001,
-    config.security.rest_port     ?? 3002,
-    agents[0]?.name               ?? 'AURA',
-    config.security.bind_address  ?? '127.0.0.1',
-  );
-
+  // Channel adapters are loaded dynamically — only enabled channels are imported.
+  // The webchat hook injects gateway metadata before init() is called.
   const channels = new ChannelManager();
   await channels.init(config, {
-    telegram:    new TelegramAdapter(),
-    whatsapp:    new WhatsAppAdapter(),
-    signal:      new SignalAdapter(),
-    slack:       new SlackAdapter(),
-    discord:     new DiscordAdapter(),
-    google_chat: new GoogleChatAdapter(),
-    teams:       new TeamsAdapter(),
-    webchat:     webchatAdapter,
+    webchat: (adapter) => {
+      // Reason: WebChatAdapter.setMeta() must be called before init() to inject
+      // canvas port, REST port, and agent name into the served HTML/WS config.
+      (adapter as unknown as {
+        setMeta(cp: number, rp: number, name: string, addr: string): void
+      }).setMeta(
+        config.canvas.port           ?? 3001,
+        config.security.rest_port    ?? 3002,
+        agents[0]?.name              ?? 'AURA',
+        config.security.bind_address ?? '127.0.0.1',
+      );
+    },
   });
+
+  channels.startHealthMonitor();
 
   // ── Proactive / cross-channel send tools ─────────────────────────────────
   const proactiveTools = new ProactiveTools(channels, agentRegistry);
@@ -412,6 +420,11 @@ async function main(): Promise<void> {
   watchAgents(agentRegistry, agentsPath, loadAgents);
 
   // ── Core event loop ───────────────────────────────────────────────────────
+  // Reason: RetryQueue is intentionally NOT used here. Delivery retries are
+  // already handled inside each channel adapter (Telegram: 3 attempts).
+  // Retrying processEventInner would re-run all LLM calls, causing duplicate
+  // responses. The RetryQueue is available for lower-level use (e.g. outbound
+  // delivery pipelines) but must not wrap the full LLM processing pipeline.
   async function processEvent(event: ANPEvent): Promise<void> {
     const waitSecs = rateLimiter.consume(event.node_id);
     if (waitSecs > 0) {
@@ -420,7 +433,6 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Show "typing…" indicator while we work; refresh every 4 s (Telegram expires after ~5 s).
     channels.sendTyping(event.node_id).catch(() => {});
     const typingInterval = setInterval(() => {
       channels.sendTyping(event.node_id).catch(() => {});
@@ -428,6 +440,8 @@ async function main(): Promise<void> {
 
     try {
       await processEventInner(event);
+    } catch (err) {
+      console.error('[Loop] Unhandled error in processEventInner:', err);
     } finally {
       clearInterval(typingInterval);
     }

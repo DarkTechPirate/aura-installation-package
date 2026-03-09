@@ -1,9 +1,16 @@
 import crypto from 'crypto';
+import os from 'os';
+import path from 'path';
+import Database from 'better-sqlite3';
 import type { LLMRouter } from '../llm/router.js';
 import type { SkillsEngine } from '../skills/engine.js';
 import type { GatewayConfig } from '../config/loader.js';
 import type { LLMMessage, ToolDefinition } from '../llm/types.js';
 import type { SkillContext } from '../skills/types.js';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('Orchestrator');
+const SESSION_DB_PATH = path.join(os.homedir(), '.aura', 'memory', 'aura.db');
 
 interface SubAgentSpec {
   role:   string;
@@ -55,7 +62,7 @@ function busPost(sessionId: string, from: string, to: string, content: string): 
   const msgs = messageBus.get(sessionId) ?? [];
   msgs.push({ from, to, content, ts: Date.now() });
   messageBus.set(sessionId, msgs);
-  console.log(`[Orchestrator] ${from} → ${to}: ${content.slice(0, 80)}`);
+  logger.debug('Agent message', { session_id: sessionId, from, to, preview: content.slice(0, 80) });
   notifyDashboard4('agent_message', { session_id: sessionId, from, to, content, ts: Date.now() });
 }
 
@@ -89,12 +96,47 @@ const MAX_SESSIONS = 20;
 
 export class AgentOrchestrator {
   private sessions = new Map<string, OrchestratorSession>();
+  private db:       Database.Database;
 
   constructor(
     private llm:    LLMRouter,
     private skills: SkillsEngine,
     private config: GatewayConfig,
-  ) {}
+  ) {
+    // Open (or create) the shared aura.db and ensure the sessions table exists.
+    this.db = new Database(SESSION_DB_PATH);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS orchestrator_sessions (
+        id         TEXT PRIMARY KEY,
+        node_id    TEXT NOT NULL,
+        objective  TEXT NOT NULL,
+        agents     TEXT NOT NULL,   -- JSON array of SubAgentRun
+        status     TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+  }
+
+  private persistSession(session: OrchestratorSession): void {
+    try {
+      this.db.prepare(`
+        INSERT INTO orchestrator_sessions (id, node_id, objective, agents, status, created_at, updated_at)
+        VALUES (@id, @node_id, @objective, @agents, @status, @created_at, @updated_at)
+        ON CONFLICT(id) DO UPDATE SET agents=excluded.agents, status=excluded.status, updated_at=excluded.updated_at
+      `).run({
+        id:         session.id,
+        node_id:    session.node_id,
+        objective:  session.objective,
+        agents:     JSON.stringify(session.agents),
+        status:     session.status,
+        created_at: session.created_at,
+        updated_at: Date.now(),
+      });
+    } catch (err) {
+      logger.warn('Failed to persist orchestrator session', { session_id: session.id, error: String(err) });
+    }
+  }
 
   getToolDef(): ToolDefinition {
     return {
@@ -144,6 +186,7 @@ export class AgentOrchestrator {
     }
 
     this.sessions.set(sessionId, session);
+    this.persistSession(session);
 
     notifyDashboard4('session_start', {
       session_id: sessionId, objective, node_id: nodeId,
@@ -172,6 +215,7 @@ export class AgentOrchestrator {
     await Promise.all(agentSpecs.map((spec, i) => this.runSubAgent(sessionId, runs[i]!, spec, agentSpecs, ctx)));
 
     session.status = 'done';
+    this.persistSession(session);
     messageBus.delete(sessionId);
     notifyDashboard4('session_done', { session_id: sessionId });
 

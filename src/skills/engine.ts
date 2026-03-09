@@ -1,12 +1,34 @@
 import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
+import { z } from 'zod';
 import chokidar from 'chokidar';
 import { SKILLS_DIR } from '../config/loader.js';
 import { SkillRegistry } from './registry.js';
 import { executeSkillTool } from './executor.js';
 import type { SkillDefinition, SkillContext } from './types.js';
 import type { ToolDefinition } from '../llm/types.js';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('Skills');
+
+// ── Skill YAML schema — invalid skills are skipped, not crash ────────────────
+const SkillToolSchema = z.object({
+  name:        z.string().min(1),
+  description: z.string().min(1),
+  parameters:  z.record(z.string(), z.unknown()).default({}),
+});
+
+const SkillDefinitionSchema = z.object({
+  name:         z.string().min(1),
+  version:      z.string().default('1.0.0'),
+  description:  z.string().default(''),
+  executor:     z.string().min(1),
+  enabled:      z.boolean().default(true),
+  source:       z.enum(['human', 'self_written']).default('human'),
+  requires_env: z.array(z.string()).default([]),
+  tools:        z.array(SkillToolSchema).min(1),
+});
 
 /**
  * Loads, hot-reloads, and executes skill definitions from ~/.aura/skills/.
@@ -25,7 +47,7 @@ export class SkillsEngine {
   async load(): Promise<void> {
     if (!fs.existsSync(SKILLS_DIR)) {
       fs.mkdirSync(SKILLS_DIR, { recursive: true });
-      console.log('[Skills] Created skills directory:', SKILLS_DIR);
+      logger.info('Created skills directory', { path: SKILLS_DIR });
       return;
     }
 
@@ -35,18 +57,21 @@ export class SkillsEngine {
     for (const file of yamlFiles) {
       try {
         const fullPath = path.join(SKILLS_DIR, file);
-        const raw = fs.readFileSync(fullPath, 'utf8');
-        const def = yaml.load(raw) as SkillDefinition;
-        if (def?.name) {
-          this.registry.register(def);
-          loaded++;
+        const raw      = fs.readFileSync(fullPath, 'utf8');
+        const parsed   = SkillDefinitionSchema.safeParse(yaml.load(raw));
+        if (!parsed.success) {
+          const issues = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
+          logger.warn('Skipping invalid skill YAML', { file, issues });
+          continue;
         }
+        this.registry.register(parsed.data as SkillDefinition);
+        loaded++;
       } catch (err) {
-        console.error(`[Skills] Failed to load ${file}:`, err);
+        logger.error(`Failed to load skill`, { file, error: String(err) });
       }
     }
 
-    console.log(`[Skills] Loaded ${loaded} skills`);
+    logger.info(`Loaded ${loaded} skills`);
   }
 
   listSkills(): SkillDefinition[] {
@@ -103,7 +128,7 @@ export class SkillsEngine {
       } else if (filePath.endsWith('.ts') || filePath.endsWith('.js') || filePath.endsWith('.mjs')) {
         // Bump the cache-bust token so next executeSkillTool call imports the fresh module
         this.executorVersions.set(filePath, Date.now());
-        console.log(`[Skills] Executor updated, cache invalidated: ${path.basename(filePath)}`);
+        logger.info('Executor updated, cache invalidated', { file: path.basename(filePath) });
       }
     });
     this.watcher.on('add', async (filePath) => {
@@ -120,15 +145,19 @@ export class SkillsEngine {
 
   private async reloadSkill(yamlPath: string): Promise<void> {
     try {
-      const raw = fs.readFileSync(yamlPath, 'utf8');
-      const def = yaml.load(raw) as SkillDefinition;
-      if (def?.name) {
-        this.registry.register(def);
-        console.log(`[Skills] Reloaded: ${def.name}${def.source === 'self_written' ? ' (source: self_written)' : ''}`);
-        this.changeCallback?.();
+      const raw    = fs.readFileSync(yamlPath, 'utf8');
+      const parsed = SkillDefinitionSchema.safeParse(yaml.load(raw));
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
+        logger.warn('Skipping invalid skill YAML on reload', { path: yamlPath, issues });
+        return;
       }
+      const def = parsed.data as SkillDefinition;
+      this.registry.register(def);
+      logger.info('Reloaded skill', { name: def.name, source: def.source ?? 'human' });
+      this.changeCallback?.();
     } catch (err) {
-      console.error(`[Skills] Failed to reload ${yamlPath}:`, err);
+      logger.error('Failed to reload skill', { path: yamlPath, error: String(err) });
     }
   }
 }
