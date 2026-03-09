@@ -25,6 +25,7 @@ import { ProactiveTools } from './scheduler/proactive.js';
 import { RateLimiter } from './security/rate_limiter.js';
 import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
+import { RetryQueue } from './retry_queue.js';
 
 import type { ToolDefinition } from './llm/types.js';
 
@@ -303,6 +304,8 @@ async function main(): Promise<void> {
     },
   });
 
+  channels.startHealthMonitor();
+
   // ── Proactive / cross-channel send tools ─────────────────────────────────
   const proactiveTools = new ProactiveTools(channels, agentRegistry);
 
@@ -401,6 +404,21 @@ async function main(): Promise<void> {
   watchAgents(agentRegistry, agentsPath, loadAgents);
 
   // ── Core event loop ───────────────────────────────────────────────────────
+  // RetryQueue wraps processEventInner: on transient failure (LLM timeout,
+  // network hiccup) the event is retried up to 3 times (1s / 5s / 30s).
+  // Rate-limited events are NOT retried — they're rejected immediately.
+  const eventQueue = new RetryQueue<ANPEvent>(async (event) => {
+    channels.sendTyping(event.node_id).catch(() => {});
+    const typingInterval = setInterval(() => {
+      channels.sendTyping(event.node_id).catch(() => {});
+    }, 4_000);
+    try {
+      await processEventInner(event);
+    } finally {
+      clearInterval(typingInterval);
+    }
+  });
+
   async function processEvent(event: ANPEvent): Promise<void> {
     const waitSecs = rateLimiter.consume(event.node_id);
     if (waitSecs > 0) {
@@ -408,18 +426,7 @@ async function main(): Promise<void> {
       await sendReply(event.node_id, `⏳ Rate limit reached — please wait ${waitSecs}s before sending another message.`, null);
       return;
     }
-
-    // Show "typing…" indicator while we work; refresh every 4 s (Telegram expires after ~5 s).
-    channels.sendTyping(event.node_id).catch(() => {});
-    const typingInterval = setInterval(() => {
-      channels.sendTyping(event.node_id).catch(() => {});
-    }, 4_000);
-
-    try {
-      await processEventInner(event);
-    } finally {
-      clearInterval(typingInterval);
-    }
+    eventQueue.enqueue(event.node_id, event);
   }
 
   async function processEventInner(event: ANPEvent): Promise<void> {

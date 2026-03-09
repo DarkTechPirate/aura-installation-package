@@ -1,6 +1,9 @@
 import type { ChannelAdapter, ChannelConfig, MediaAttachment } from './interface.js';
 import type { ANPEvent } from '../anp/types.js';
 import type { GatewayConfig } from '../config/loader.js';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('Channels');
 
 /** Factory signature: resolves to a constructor that produces a ChannelAdapter. */
 type AdapterFactory = () => Promise<new () => ChannelAdapter>;
@@ -27,9 +30,14 @@ const CHANNEL_REGISTRY: Record<string, AdapterFactory> = {
  * Hooks: optional per-channel setup functions called after construction but before init().
  * Used for channels like webchat that need extra configuration (e.g. setMeta).
  */
+const HEALTH_INTERVAL_MS   = 60_000; // poll every 60 s
+const HEALTH_FAIL_THRESHOLD = 3;      // mark degraded after 3 consecutive failures
+
 export class ChannelManager {
-  private adapters = new Map<string, ChannelAdapter>();
-  private handlers: Array<(event: ANPEvent) => void> = [];
+  private adapters      = new Map<string, ChannelAdapter>();
+  private handlers:     Array<(event: ANPEvent) => void> = [];
+  private failCounts    = new Map<string, number>();
+  private healthTimer:  ReturnType<typeof setInterval> | null = null;
 
   async init(
     config: GatewayConfig,
@@ -41,7 +49,7 @@ export class ChannelManager {
 
       const factory = CHANNEL_REGISTRY[name];
       if (!factory) {
-        console.warn(`[Channels] Unknown channel "${name}" — add it to CHANNEL_REGISTRY in manager.ts`);
+        logger.warn(`Unknown channel — add it to CHANNEL_REGISTRY`, { channel: name });
         continue;
       }
 
@@ -57,9 +65,39 @@ export class ChannelManager {
           for (const h of this.handlers) h(event);
         });
         this.adapters.set(name, adapter);
-        console.log(`[Channels] Started: ${name}`);
+        logger.info('Channel started', { channel: name });
       } catch (err) {
-        console.error(`[Channels] Failed to start ${name}:`, err);
+        logger.error('Failed to start channel', { channel: name, error: String(err) });
+      }
+    }
+  }
+
+  /** Start proactive health polling. Call once after init(). */
+  startHealthMonitor(): void {
+    if (this.healthTimer) return;
+    this.healthTimer = setInterval(() => { this.checkHealth().catch(() => {}); }, HEALTH_INTERVAL_MS);
+  }
+
+  private async checkHealth(): Promise<void> {
+    for (const [name, adapter] of this.adapters) {
+      try {
+        const healthy = await adapter.isHealthy();
+        if (healthy) {
+          if ((this.failCounts.get(name) ?? 0) > 0) {
+            logger.info('Channel recovered', { channel: name });
+          }
+          this.failCounts.set(name, 0);
+        } else {
+          const fails = (this.failCounts.get(name) ?? 0) + 1;
+          this.failCounts.set(name, fails);
+          if (fails >= HEALTH_FAIL_THRESHOLD) {
+            logger.warn('Channel degraded', { channel: name, consecutive_failures: fails });
+          }
+        }
+      } catch (err) {
+        const fails = (this.failCounts.get(name) ?? 0) + 1;
+        this.failCounts.set(name, fails);
+        logger.warn('Channel health check threw', { channel: name, error: String(err), consecutive_failures: fails });
       }
     }
   }
@@ -75,7 +113,7 @@ export class ChannelManager {
         return;
       }
     }
-    console.warn(`[Channels] No adapter found for node_id: ${node_id}`);
+    logger.warn('No adapter found for node_id', { node_id });
   }
 
   /** Send a typing/composing indicator if the adapter supports it. */
@@ -89,6 +127,7 @@ export class ChannelManager {
   }
 
   async destroy(): Promise<void> {
+    if (this.healthTimer) { clearInterval(this.healthTimer); this.healthTimer = null; }
     for (const adapter of this.adapters.values()) {
       try { await adapter.destroy(); } catch {}
     }

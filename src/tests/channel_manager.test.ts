@@ -84,7 +84,7 @@ describe('ChannelManager', () => {
     manager['CHANNEL_REGISTRY_override'] = { testchan: async () => class { } };
 
     // Simulate hook call + init order manually via spies
-    const hookSpy = vi.fn(() => { order.push('hook'); });
+    const hookSpy = vi.fn((_adapter: unknown) => { order.push('hook'); });
     hookSpy(fakeAdapter);
     await fakeAdapter.init({ enabled: true });
 
