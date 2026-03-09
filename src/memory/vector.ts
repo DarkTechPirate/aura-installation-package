@@ -162,14 +162,17 @@ export class VectorMemory {
    * Find the most semantically relevant skills for a given message.
    * Returns skill names sorted by similarity, filtered by threshold.
    */
-  async searchSkills(query: string, limit = 3, threshold = 0.3): Promise<string[]> {
+  async searchSkills(query: string, limit = 5, threshold = 0.15): Promise<string[]> {
     if (this.skillIndex.length === 0) return [];
     try {
-      const qvec = await this.embed(query);
-      return this.skillIndex
+      const qvec   = await this.embed(query);
+      const scored = this.skillIndex
         .map(s => ({ name: s.name, score: this.cosineSim(qvec, s.embedding) }))
+        .sort((a, b) => b.score - a.score);
+      // Log top-3 scores to help tune threshold
+      console.debug(`[VectorMemory] top scores: ${scored.slice(0, 3).map(s => `${s.name}=${s.score.toFixed(3)}`).join(', ')}`);
+      return scored
         .filter(s => s.score > threshold)
-        .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map(s => s.name);
     } catch (err) {

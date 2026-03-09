@@ -25,7 +25,6 @@ import { ProactiveTools } from './scheduler/proactive.js';
 import { RateLimiter } from './security/rate_limiter.js';
 import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
-import { RetryQueue } from './retry_queue.js';
 
 import type { ToolDefinition } from './llm/types.js';
 
@@ -404,21 +403,11 @@ async function main(): Promise<void> {
   watchAgents(agentRegistry, agentsPath, loadAgents);
 
   // ── Core event loop ───────────────────────────────────────────────────────
-  // RetryQueue wraps processEventInner: on transient failure (LLM timeout,
-  // network hiccup) the event is retried up to 3 times (1s / 5s / 30s).
-  // Rate-limited events are NOT retried — they're rejected immediately.
-  const eventQueue = new RetryQueue<ANPEvent>(async (event) => {
-    channels.sendTyping(event.node_id).catch(() => {});
-    const typingInterval = setInterval(() => {
-      channels.sendTyping(event.node_id).catch(() => {});
-    }, 4_000);
-    try {
-      await processEventInner(event);
-    } finally {
-      clearInterval(typingInterval);
-    }
-  });
-
+  // Reason: RetryQueue is intentionally NOT used here. Delivery retries are
+  // already handled inside each channel adapter (Telegram: 3 attempts).
+  // Retrying processEventInner would re-run all LLM calls, causing duplicate
+  // responses. The RetryQueue is available for lower-level use (e.g. outbound
+  // delivery pipelines) but must not wrap the full LLM processing pipeline.
   async function processEvent(event: ANPEvent): Promise<void> {
     const waitSecs = rateLimiter.consume(event.node_id);
     if (waitSecs > 0) {
@@ -426,7 +415,19 @@ async function main(): Promise<void> {
       await sendReply(event.node_id, `⏳ Rate limit reached — please wait ${waitSecs}s before sending another message.`, null);
       return;
     }
-    eventQueue.enqueue(event.node_id, event);
+
+    channels.sendTyping(event.node_id).catch(() => {});
+    const typingInterval = setInterval(() => {
+      channels.sendTyping(event.node_id).catch(() => {});
+    }, 4_000);
+
+    try {
+      await processEventInner(event);
+    } catch (err) {
+      console.error('[Loop] Unhandled error in processEventInner:', err);
+    } finally {
+      clearInterval(typingInterval);
+    }
   }
 
   async function processEventInner(event: ANPEvent): Promise<void> {
