@@ -110,6 +110,20 @@ async function smartLoadSkills(
     }
   }
 
+  // ── Skill groups: when any member is triggered, the whole group loads ────────
+  // Add your own groups here if you have other tightly-coupled skill sets.
+  const SKILL_GROUPS: string[][] = [
+    ['forex', 'trading', 'forex_monitor', 'forex_journal'],
+  ];
+
+  function expandGroups(skills: Set<string>): void {
+    for (const group of SKILL_GROUPS) {
+      if (group.some(s => skills.has(s))) {
+        group.forEach(s => { if (agentSkillSet.has(s)) skills.add(s); });
+      }
+    }
+  }
+
   // 3a. Instrument override — financial tickers/pairs that vector search misses on short queries.
   // Leading \b only — matches xau/xausd/xauusd etc. (no trailing boundary so prefixes work)
   const FOREX_PATTERN = /\b(xau|xag|xpt|xpd|eur|gbp|jpy|aud|cad|chf|nzd|forex|oanda|gold|silver|pip\b|spread\b|currency\b)/i;
@@ -132,6 +146,9 @@ async function smartLoadSkills(
   for (const s of matched) {
     if (agentSkillSet.has(s)) toLoad.add(s);
   }
+
+  // 3c. Expand skill groups — any triggered member pulls in the full group
+  expandGroups(toLoad);
 
   // 4. Re-add any skills already active in this session (accumulate, never drop)
   for (const s of sessionSkills) {
