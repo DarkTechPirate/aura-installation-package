@@ -26,8 +26,6 @@ import { RateLimiter } from './security/rate_limiter.js';
 import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
 
-// Channel adapters
-import { TelegramAdapter } from './channels/telegram.js';
 import type { ToolDefinition } from './llm/types.js';
 
 // ── Core skills always loaded regardless of message content ──────────────────
@@ -151,13 +149,6 @@ async function smartLoadSkills(
     unloadedSkillNames,
   };
 }
-import { WhatsAppAdapter } from './channels/whatsapp.js';
-import { SignalAdapter }   from './channels/signal.js';
-import { SlackAdapter }    from './channels/slack.js';
-import { DiscordAdapter }  from './channels/discord.js';
-import { GoogleChatAdapter } from './channels/google_chat.js';
-import { TeamsAdapter }    from './channels/teams.js';
-import { WebChatAdapter }  from './channels/webchat.js';
 
 import type { ANPEvent, UtterancePayload } from './anp/types.js';
 import type { LLMMessage, ToolCall } from './llm/types.js';
@@ -294,24 +285,22 @@ async function main(): Promise<void> {
   await anpServer.start();
 
   // ── Channel Manager ───────────────────────────────────────────────────────
-  const webchatAdapter = new WebChatAdapter();
-  webchatAdapter.setMeta(
-    config.canvas.port            ?? 3001,
-    config.security.rest_port     ?? 3002,
-    agents[0]?.name               ?? 'AURA',
-    config.security.bind_address  ?? '127.0.0.1',
-  );
-
+  // Channel adapters are loaded dynamically — only enabled channels are imported.
+  // The webchat hook injects gateway metadata before init() is called.
   const channels = new ChannelManager();
   await channels.init(config, {
-    telegram:    new TelegramAdapter(),
-    whatsapp:    new WhatsAppAdapter(),
-    signal:      new SignalAdapter(),
-    slack:       new SlackAdapter(),
-    discord:     new DiscordAdapter(),
-    google_chat: new GoogleChatAdapter(),
-    teams:       new TeamsAdapter(),
-    webchat:     webchatAdapter,
+    webchat: (adapter) => {
+      // Reason: WebChatAdapter.setMeta() must be called before init() to inject
+      // canvas port, REST port, and agent name into the served HTML/WS config.
+      (adapter as unknown as {
+        setMeta(cp: number, rp: number, name: string, addr: string): void
+      }).setMeta(
+        config.canvas.port           ?? 3001,
+        config.security.rest_port    ?? 3002,
+        agents[0]?.name              ?? 'AURA',
+        config.security.bind_address ?? '127.0.0.1',
+      );
+    },
   });
 
   // ── Proactive / cross-channel send tools ─────────────────────────────────
