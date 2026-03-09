@@ -65,8 +65,6 @@ export class ContextBuilder {
   async build(params: ContextBuildParams): Promise<LLMParams> {
     const { event, agent, shortTerm, semanticHits, toolDefs, config, userProfile, selfKnowledge, installedSkills, unloadedSkillNames } = params;
 
-    const now = new Date().toISOString();
-
     // ── Identity & persona ────────────────────────────────────────────────────
     let system = agent.persona.trim();
 
@@ -189,15 +187,6 @@ export class ContextBuilder {
                 `Never refuse to use a tool that is present in your tool list based on a memory entry.`;
     }
 
-    // ── Time & memory ─────────────────────────────────────────────────────────
-    system += `\n\nCurrent time: ${now}`;
-
-    if (semanticHits.length > 0) {
-      // Cap to 5 hits × 400 chars each — enough context without flooding
-      const capped = semanticHits.slice(0, 5).map(h => h.slice(0, 400));
-      system += `\n\nRelevant memory:\n${capped.join('\n')}`;
-    }
-
     // ── Message history ───────────────────────────────────────────────────────
     // Token budget: keep only last MAX_MESSAGES turns
     let messages = shortTerm.slice(-MAX_MESSAGES);
@@ -215,6 +204,28 @@ export class ContextBuilder {
         }
         messages = [...messages, userMsg];
       }
+    }
+
+    // ── Volatile context injection ────────────────────────────────────────────
+    // Current time and semantic memory hits are injected into the first user
+    // message rather than the system prompt. This keeps the system prompt
+    // byte-identical across turns so Claude's prompt cache can be reused.
+    const now = new Date().toISOString();
+    const volatileParts: string[] = [`[Context: Current time: ${now}]`];
+    if (semanticHits.length > 0) {
+      const capped = semanticHits.slice(0, 5).map(h => h.slice(0, 400));
+      volatileParts.push(`[Relevant memory:\n${capped.join('\n')}]`);
+    }
+    const volatilePrefix = volatileParts.join('\n') + '\n\n';
+
+    // Prepend to the first user message so it appears at the start of the turn
+    const firstUserIdx = messages.findIndex(m => m.role === 'user');
+    if (firstUserIdx !== -1 && typeof messages[firstUserIdx].content === 'string') {
+      messages = [
+        ...messages.slice(0, firstUserIdx),
+        { ...messages[firstUserIdx], content: volatilePrefix + messages[firstUserIdx].content },
+        ...messages.slice(firstUserIdx + 1),
+      ];
     }
 
     return {
