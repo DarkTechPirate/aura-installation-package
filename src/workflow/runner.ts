@@ -14,7 +14,7 @@ import { createLogger } from '../logger.js';
 
 const logger = createLogger('Workflow');
 
-const MAX_RESULT_CHARS = 3000; // cap per tool to avoid context blowup
+const MAX_RESULT_CHARS = 5000; // cap per tool — analysis data (multi-TF) needs more room
 
 export interface StepResult {
   toolName: string;

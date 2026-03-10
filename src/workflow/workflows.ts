@@ -44,20 +44,33 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
         parallel:    true,
         allowTools:  false,
         steps: [
+          // Broad ranking — tells us which pairs have momentum right now
           {
             toolName: 'forex_scan',
             args: {
-              instruments: ['XAU_USD', 'EUR_USD', 'GBP_USD', 'USD_JPY', 'GBP_JPY', 'XAG_USD'],
+              instruments: ['XAU_USD', 'XAG_USD', 'EUR_USD', 'GBP_USD', 'USD_JPY', 'GBP_JPY', 'AUD_USD', 'USD_CHF'],
               granularity: 'D',
             },
           },
-          { toolName: 'forex_account',   args: {} },
+          // Deep multi-timeframe analysis (D + H4 + H1 confluence) on the most traded pairs.
+          // All run in parallel — no sequential dependency needed for market scan.
+          { toolName: 'forex_analysis', args: { instrument: 'XAU_USD', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'EUR_USD', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'GBP_USD', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'USD_JPY', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'XAG_USD', multi_tf: true } },
+          // Positions for correlation check only — not the focus of this analysis
           { toolName: 'forex_positions', args: {} },
         ],
         llmInstruction:
-          'Based on the scan results and current account state, give a concise market overview ' +
-          'and up to 3 trade ideas ranked by conviction. Be direct and specific — name the instrument, ' +
-          'direction, and key reason. Flag any correlation risk with open positions.',
+          'You are writing a market briefing for an active trader. Rules:\n' +
+          '- Focus ENTIRELY on the market data — technical setups, momentum, key price levels.\n' +
+          '- Do NOT lead with or summarise open positions. Mention them only at the end as a one-line correlation note.\n' +
+          '- For each of the top 2-3 setups: state instrument, direction, the specific technical reason ' +
+          '(RSI level, EMA cross, Bollinger squeeze, S/R level — use actual values from the data), ' +
+          'and concrete entry/SL/TP levels using the ATR data provided.\n' +
+          '- Rank by conviction. If a pair has conflicting signals across timeframes, say so and rank it lower.\n' +
+          '- No emojis. No section headers. Concise structured prose. Max 300 words.',
       };
 
     case 'account_review':
