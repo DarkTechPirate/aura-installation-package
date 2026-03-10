@@ -671,9 +671,9 @@ async function main(): Promise<void> {
 
       if (!workflowDef.allowTools) {
         // ── Narrate mode: one-shot LLM call, no tool loop ─────────────────────
-        // Cap at 600 tokens — workflow narrations are short-form summaries.
-        // This is the main latency driver on local models, so keep it tight.
-        const WF_MAX_TOKENS = 600;
+        // Cap workflow narrations — main latency driver on local models.
+        // 800 gives enough room for multi-TF market briefings (~400 words).
+        const WF_MAX_TOKENS = 800;
         audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
         let wfResponse;
         const llmT0 = Date.now();

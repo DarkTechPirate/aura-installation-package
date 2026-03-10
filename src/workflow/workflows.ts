@@ -71,14 +71,20 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
         parallel:   true,
         allowTools: false,
         steps: [
-          // forex_scan covers 8 instruments with signals — main data source
+          // Daily scan — broad ranking across all 8 instruments
           {
             toolName: 'forex_scan',
             args: {
               instruments: ['XAU_USD', 'XAG_USD', 'EUR_USD', 'GBP_USD', 'USD_JPY', 'GBP_JPY', 'AUD_USD', 'USD_CHF'],
-              granularity: 'H4',
+              granularity: 'D',
             },
           },
+          // Deep multi-TF analysis (D + H4 + H1) for top pairs — full confluence + ATR
+          { toolName: 'forex_analysis', args: { instrument: 'XAU_USD', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'EUR_USD', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'GBP_USD', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'USD_JPY', multi_tf: true } },
+          { toolName: 'forex_analysis', args: { instrument: 'XAG_USD', multi_tf: true } },
           { toolName: 'forex_positions', args: {} },
         ],
         llmInstruction:

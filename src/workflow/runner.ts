@@ -28,8 +28,11 @@ export interface StepResult {
 
 type ExecuteFn = (call: ToolCall, ctx: SkillContext, sessionId: string) => Promise<unknown>;
 
+// Monotonic counter — guarantees unique IDs even when multiple steps with the
+// same toolName are started in the same millisecond (e.g. parallel forex_analysis).
+let _callSeq = 0;
 function makeCall(toolName: string, args: Record<string, unknown>): ToolCall {
-  return { id: `wf-${toolName}-${Date.now()}`, name: toolName, args };
+  return { id: `wf-${toolName}-${++_callSeq}`, name: toolName, args };
 }
 
 function formatResult(stepResult: StepResult): string {

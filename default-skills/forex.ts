@@ -348,44 +348,56 @@ export async function forex_cancel(args: { order_id: string }, _ctx: unknown): P
 }
 
 export async function forex_scan(
-  args: { instruments: string[] },
+  args: { instruments: string[]; granularity?: string },
   _ctx: unknown,
 ): Promise<unknown> {
+  const gran = args.granularity ?? 'D';
   try {
     const oanda = client();
     const results = await Promise.all(
       args.instruments.map(async (sym) => {
         try {
-          const candles = await oanda.getCandles(sym, 'D', 100);
-          if (candles.length < 30) return { instrument: sym, error: 'Not enough data' };
+          const candles = await oanda.getCandles(sym, gran, 100);
+          if (candles.length < 30) return { error: true, instrument: sym, message: 'Not enough data' };
           const bars: Bar[] = candles.map(c => ({
             t: c.time, o: parseFloat(c.mid.o), h: parseFloat(c.mid.h),
             l: parseFloat(c.mid.l), c: parseFloat(c.mid.c), v: c.volume,
           }));
-          return analyze(bars, OandaClient.normalise(sym));
-        } catch (e) { return { instrument: sym, error: String(e) }; }
+          const result = analyze(bars, OandaClient.normalise(sym));
+          const atr    = calcAtr(bars);
+          const pip    = pipSize(result.symbol);
+          return { error: false, result, atr, pip };
+        } catch (e) { return { error: true, instrument: sym, message: String(e) }; }
       })
     );
 
     const valid = results
-      .filter(r => !('error' in r))
-      .sort((a, b) => (b as { score: number }).score - (a as { score: number }).score);
+      .filter(r => !r.error)
+      .sort((a, b) => {
+        const ra = a as { result: ReturnType<typeof analyze> };
+        const rb = b as { result: ReturnType<typeof analyze> };
+        return rb.result.score - ra.result.score;
+      });
 
     return {
+      granularity: gran,
       scanned:     args.instruments.length,
-      buy_signals: valid.filter(r => (r as { signal: string }).signal === 'buy').length,
+      buy_signals: valid.filter(r => (r as { result: ReturnType<typeof analyze> }).result.signal === 'buy').length,
       rankings:    valid.map(r => {
-        const v = r as ReturnType<typeof analyze>;
+        const { result: v, atr, pip } = r as { result: ReturnType<typeof analyze>; atr: number; pip: number };
         return {
           instrument: v.symbol,
           signal:     v.signal.toUpperCase(),
           score:      `${v.score}/100`,
           trend:      v.trend,
+          price:      v.price,
           rsi14:      v.rsi14.toFixed(1),
-          reasons:    v.reasons.slice(0, 2),
+          atr:        atr.toFixed(5),
+          atr_pips:   (atr / pip).toFixed(1),
+          reasons:    v.reasons,
         };
       }),
-      errors: results.filter(r => 'error' in r),
+      errors: results.filter(r => r.error).map(r => ({ instrument: (r as { instrument: string }).instrument, error: (r as { message: string }).message })),
     };
   } catch (e) { return { error: String(e) }; }
 }
