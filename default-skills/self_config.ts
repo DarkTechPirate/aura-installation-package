@@ -296,14 +296,73 @@ export async function list_models(
 
 const HEARTBEAT_MD = path.join(AURA_DIR, 'HEARTBEAT.md');
 
+const HEARTBEAT_GUIDE = `
+## How HEARTBEAT.md works
+- Runs every 30 minutes automatically
+- The LLM reads your instructions and decides whether to act
+- If nothing applies, it responds HEARTBEAT_OK (silent)
+- Instructions are plain English — write conditions and actions clearly
+
+## Available tools you can reference in instructions
+
+### Forex / Trading
+- forex_scan         — scan multiple instruments for setups (args: instruments[], granularity)
+- forex_analysis     — deep multi-TF analysis for one instrument (args: instrument, multi_tf)
+- forex_positions    — list open trades
+- forex_account      — account balance, equity, margin
+- forex_orders       — pending orders
+- forex_quote        — current price for an instrument
+- forex_pre_trade    — go/no-go check before trading (args: instrument, side)
+- forex_trade        — place a trade (args: instrument, side, units)
+- forex_close        — close a trade (args: trade_id)
+- forex_cancel       — cancel a pending order (args: order_id)
+- forex_update_sltp  — update SL/TP on a trade
+
+### Notifications
+- send_to_agent_channels — send a message to all your channels (Telegram etc)
+
+### Calendar & Reminders
+- calendar_list_events  — list upcoming events (args: days_ahead)
+- list_reminders        — list pending reminders
+- set_reminder          — create a reminder (args: text, due)
+
+### Market Data
+- forex_scan            — ranked scan across instruments
+- search                — web search (args: query)
+
+### Notes
+- notes_create / notes_append / notes_read / notes_list
+
+## Example instructions you can write
+
+\`\`\`
+## Morning brief
+Every morning between 07:00-08:00: run forex_scan on [XAU_USD, EUR_USD, GBP_USD],
+then send a market summary via send_to_agent_channels.
+
+## Drawdown alert
+If forex_account shows equity dropped more than 5% below balance,
+send an urgent alert via send_to_agent_channels.
+
+## Reminder check
+If list_reminders returns any overdue items, notify me via send_to_agent_channels.
+\`\`\`
+
+## Rules
+- Be specific about conditions (time ranges, thresholds, instrument names)
+- One instruction per section with a clear ## heading
+- The LLM checks current time — use time ranges like "between 07:00-08:00"
+- Silent rule always applies: if nothing matches, respond HEARTBEAT_OK
+`;
+
 export async function heartbeat_read(
   _args: Record<string, unknown>,
   _ctx: unknown
 ): Promise<unknown> {
   const content = fs.existsSync(HEARTBEAT_MD)
     ? fs.readFileSync(HEARTBEAT_MD, 'utf8')
-    : '(HEARTBEAT.md does not exist yet)';
-  return { content };
+    : '(HEARTBEAT.md does not exist yet — use heartbeat_write to create it)';
+  return { content, guide: HEARTBEAT_GUIDE };
 }
 
 export async function heartbeat_write(
