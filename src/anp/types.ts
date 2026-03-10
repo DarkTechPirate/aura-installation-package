@@ -38,11 +38,12 @@ export type IncomingAttachment = {
 };
 
 export type UtterancePayload = {
-  text:          string;
-  confidence?:   number;
-  image_b64?:    string | null;        // Base64-encoded image (triggers vision tier)
-  attachments?:  IncomingAttachment[]; // Non-image media attached to the message
-  routing_hint?: RoutingHint;
+  text:               string;
+  confidence?:        number;
+  image_b64?:         string | null;        // Base64-encoded image (triggers vision tier)
+  attachments?:       IncomingAttachment[]; // Non-image media attached to the message
+  routing_hint?:      RoutingHint;
+  workflow_disabled?: boolean;              // When true, skip hybrid orchestrator — pure LLM loop
   context?: { battery?: number; activity?: string; time_of_day?: string };
 };
 

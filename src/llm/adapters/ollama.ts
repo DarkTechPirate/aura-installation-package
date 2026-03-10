@@ -50,9 +50,12 @@ export class OllamaAdapter implements LLMAdapter {
     ];
 
     const body: Record<string, unknown> = {
-      model: this.model,
+      model:   this.model,
       messages,
-      stream: false,
+      stream:  false,
+      options: {
+        ...(params.max_tokens != null ? { num_predict: params.max_tokens } : {}),
+      },
     };
 
     if (params.tools && params.tools.length > 0) {

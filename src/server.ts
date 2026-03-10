@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -21,12 +22,28 @@ import { CanvasServer } from './canvas/server.js';
 import { RestAPI, type HeartbeatLogEntry, type TokenStats, type TokenCallEntry } from './api/rest.js';
 import { SchedulerEngine } from './scheduler/engine.js';
 import { HeartbeatRunner } from './scheduler/heartbeat.js';
-import { ProactiveTools } from './scheduler/proactive.js';
+import { ProactiveTools }  from './scheduler/proactive.js';
+import { PulseRunner }     from './scheduler/pulse.js';
+import { AlertTemplate }  from './scheduler/alert_template.js';
+import { TradeMonitor }   from './scheduler/monitors/trade_monitor.js';
 import { RateLimiter } from './security/rate_limiter.js';
 import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
 
 import type { ToolDefinition } from './llm/types.js';
+import { detectIntent }    from './workflow/intent.js';
+import { resolveWorkflow } from './workflow/workflows.js';
+import { gary }            from './gary/manager.js';
+import { scoreMessage }    from './llm/scorer.js';
+import {
+  buildPendingApproval,
+  consumePendingApproval,
+  hasPendingApproval,
+  isConfirmation,
+  isCancellation,
+  pruneExpiredApprovals,
+  storePendingApproval,
+} from './workflow/approvals.js';
 
 // ── Core skills always loaded regardless of message content ──────────────────
 const CORE_SKILLS = new Set([
@@ -243,7 +260,7 @@ async function main(): Promise<void> {
 
   const rateLimiter = new RateLimiter(20, 60_000);
   // Cleanup stale rate limit buckets and sessions every 10 minutes
-  setInterval(() => { rateLimiter.cleanup(); memory.cleanupSessions(); purgeExpiredSessionSkills(); }, 600_000);
+  setInterval(() => { rateLimiter.cleanup(); memory.cleanupSessions(); purgeExpiredSessionSkills(); pruneExpiredApprovals(); }, 600_000);
   const extractor = new MemoryExtractor(llm, memory);
   const contextBuilder = new ContextBuilder();
 
@@ -459,10 +476,106 @@ async function main(): Promise<void> {
       payload.text = `${desc}\n${payload.text}`;
     }
 
-    const agent   = agentRegistry.resolve(event.node_id);
-    const tier    = payload.image_b64
+    const agent = agentRegistry.resolve(event.node_id);
+
+    // ── Approval gate — check before anything else ────────────────────────────
+    // If the user has a pending approval (from a requiresApproval workflow),
+    // intercept this message and either resume or cancel the pending action.
+    if (hasPendingApproval(event.session_id)) {
+      if (isConfirmation(payload.text)) {
+        const pending = consumePendingApproval(event.session_id);
+        if (pending) {
+          console.log(`[Workflow] Approval confirmed for intent: ${pending.workflowDef.intent}`);
+          // Resume: run LLM loop with pre-fetched data + confirmation injected
+          const confirmMessages: LLMMessage[] = [
+            ...pending.augmentedMessages.slice(0, -1),
+            {
+              role: 'user' as const,
+              content: pending.augmentedMessages.at(-1)?.content +
+                '\n\n[User confirmed — proceed with the action now.]',
+            },
+          ];
+          // Fall through to LLM loop with the confirmed messages
+          const shortTerm     = memory.getShortTerm(event.session_id);
+          const semanticHits  = await memory.search(agent.memory_ns, pending.originalText).catch(() => []);
+          const userProfile   = memory.readProfile(agent.memory_ns);
+          const selfKnowledge = memory.readSelf(agent.memory_ns);
+          const { toolDefs: skillToolDefs, unloadedSkillNames } = await smartLoadSkills(
+            agent.skills ?? [], pending.originalText, event.session_id, skills, memory,
+          );
+          const rawToolsR = [
+            ...skillToolDefs, selfWriteTool.toolDef, orchestrator.getToolDef(),
+            ...canvasToolDefs, ...memoryToolDefs, ...proactiveTools.getToolDefs(),
+          ];
+          const seenR = new Set<string>();
+          const allToolsR = rawToolsR.filter(t => { if (seenR.has(t.name)) return false; seenR.add(t.name); return true; });
+          const ctxR  = buildSkillContext(event, agent.memory_ns);
+          const paramsR = await contextBuilder.build({
+            event, agent, shortTerm, semanticHits, toolDefs: allToolsR, config,
+            userProfile, selfKnowledge, unloadedSkillNames,
+            installedSkills: skills.listSkills().filter(s => s.enabled).map(s => ({ name: s.name, description: s.description })),
+          });
+
+          let messagesR: LLMMessage[] = confirmMessages.length > 0 ? confirmMessages : paramsR.messages;
+          let iterR = 0;
+          while (iterR < MAX_TOOL_ITERATIONS) {
+            iterR++;
+            audit.llmCall(event.node_id, agent.memory_ns, agent.llm_tier, agent.llm_tier);
+            let respR;
+            try {
+              respR = await llm.complete(agent.llm_tier, { system: paramsR.system, messages: messagesR, tools: paramsR.tools, max_tokens: paramsR.max_tokens });
+            } catch (err) {
+              console.error('[Approval] LLM error:', err);
+              await sendReply(event.node_id, 'Error resuming after approval. Try again.', agent.voice_id);
+              return;
+            }
+            tokenStats.total_input  += respR.usage.input_tokens;
+            tokenStats.total_output += respR.usage.output_tokens;
+            tokenStats.calls.unshift({ ts: Date.now(), node_id: event.node_id, tier: agent.llm_tier, model: respR.model, input_tokens: respR.usage.input_tokens, output_tokens: respR.usage.output_tokens } satisfies TokenCallEntry);
+            if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+            if (!respR.tool_calls || respR.tool_calls.length === 0) {
+              memory.addTurn(event.session_id, agent.memory_ns, 'user', payload.text);
+              memory.addTurn(event.session_id, agent.memory_ns, 'assistant', respR.text);
+              const { text: safeT, count: cnt } = scanSecrets(respR.text);
+              if (cnt > 0) audit.secretRedacted(event.node_id, cnt);
+              await sendReply(event.node_id, safeT, agent.voice_id);
+              return;
+            }
+            messagesR = [...messagesR, { role: 'assistant' as const, content: respR.text || '', tool_calls: respR.tool_calls }];
+            for (const call of respR.tool_calls) {
+              if (!call.name) continue;
+              let resR: unknown;
+              try { resR = await executeToolCall(call, ctxR, event.session_id); }
+              catch (err) { resR = `Error: ${err instanceof Error ? err.message : String(err)}`; }
+              const rawR = JSON.stringify(resR);
+              messagesR = [...messagesR, { role: 'tool', content: rawR.length > MAX_TOOL_RESULT_CHARS ? rawR.slice(0, MAX_TOOL_RESULT_CHARS) + '...[truncated]' : rawR, tool_call_id: call.id }];
+            }
+          }
+          return;
+        }
+      } else if (isCancellation(payload.text)) {
+        consumePendingApproval(event.session_id);
+        await sendReply(event.node_id, 'Cancelled.', agent.voice_id);
+        return;
+      }
+      // Non-yes/no reply — consume and fall through to normal processing
+      consumePendingApproval(event.session_id);
+    }
+
+    // ── Dynamic tier scoring (claw-llm-router pattern) ────────────────────────
+    // Score message complexity in <1ms. Vision/audio tiers set by payload take
+    // precedence; scoring only applies to text messages.
+    const tier = payload.image_b64
       ? (payload.routing_hint === 'local_vision' ? 'local_vision' : 'vision')
-      : agent.llm_tier;
+      : (() => {
+          const scored = scoreMessage(payload.text);
+          // Only override if the scored tier differs from the agent's default
+          // AND the agent has a distinct model configured for that tier.
+          // This prevents pointless re-routing when both tiers use the same model.
+          const agentTier = agent.llm_tier;
+          console.log(`[Scorer] score=${scored.score} tier=${scored.tier} (agent default: ${agentTier})`);
+          return scored.tier;
+        })();
 
     const shortTerm    = memory.getShortTerm(event.session_id);
     const semanticHits = await memory.search(agent.memory_ns, payload.text).catch(() => []);
@@ -476,6 +589,12 @@ async function main(): Promise<void> {
       skills,
       memory,
     );
+    const pulseStatusToolDef = {
+      name: 'pulse_status',
+      description: 'Get the current status of the Pulse trade monitor — last check time, recent alerts, and per-monitor stats. Use this when the user asks about trade monitoring, pulse, or recent alerts.',
+      parameters: { type: 'object', properties: {} },
+    };
+
     const rawTools         = [
       ...skillToolDefs,
       selfWriteTool.toolDef,
@@ -483,6 +602,7 @@ async function main(): Promise<void> {
       ...canvasToolDefs,
       ...memoryToolDefs,
       ...proactiveTools.getToolDefs(),
+      pulseStatusToolDef,
     ];
     // Deduplicate by name — first definition wins (Claude rejects duplicate tool names)
     const seen = new Set<string>();
@@ -505,7 +625,140 @@ async function main(): Promise<void> {
       unloadedSkillNames,
     });
 
-    let messages: LLMMessage[] = params.messages;
+    // ── Hybrid workflow shortcut ──────────────────────────────────────────────
+    // Detect known structured intents and pre-fetch tool data deterministically.
+    //
+    // allowTools=false (narrate mode): orchestrator runs all steps → one-shot LLM
+    //   call with tools disabled. Fastest path; LLM just narrates the data.
+    //   Used for: market_scan, account_review, quick_quote, pre_trade_check, daily_brief, etc.
+    //
+    // allowTools=true (assist mode): orchestrator pre-fetches lookup data → injects
+    //   into context → falls into the normal LLM tool loop. LLM reasons over the
+    //   fetched data and calls the action tool with the correct record.
+    //   Used for: close_trade, cancel_order, update_sltp (require LLM to pick right ID).
+    //
+    // Unmatched intents fall through to the existing tool loop unchanged.
+    const intentMatch = payload.workflow_disabled ? null : detectIntent(payload.text);
+    const workflowDef = intentMatch ? resolveWorkflow(intentMatch) : null;
+
+    // prefetchedMessages: set when allowTools=true so the LLM loop starts with
+    // pre-fetched data already injected into the user message.
+    let prefetchedMessages: LLMMessage[] | null = null;
+
+    if (workflowDef) {
+      const garyT0 = Date.now();
+      console.log(`[Gary] Intent: ${intentMatch!.intent}`);
+      const garyResult = await gary.run(intentMatch!, ctx, executeToolCall, event.session_id);
+      console.log(`[Gary] Workflow done: ${Date.now() - garyT0}ms (ok=${garyResult.ok})`);
+      if (!garyResult.ok) {
+        console.error(`[Gary] Error: ${garyResult.output}`);
+        await sendReply(event.node_id, `⚠️ Workflow error: ${garyResult.output}`, event.session_id);
+        return;
+      }
+      const assembled = garyResult.output;
+
+      const lastUserContent = params.messages.at(-1)?.content ?? payload.text;
+      const augmentedContent =
+        lastUserContent + '\n\n' +
+        '[Pre-fetched data — use this to complete the request, do not show raw JSON]\n' +
+        assembled + '\n\n' +
+        workflowDef.llmInstruction;
+
+      const augmentedMessages: LLMMessage[] = [
+        ...params.messages.slice(0, -1),
+        { role: 'user' as const, content: augmentedContent },
+      ];
+
+      if (!workflowDef.allowTools) {
+        // ── Narrate mode: one-shot LLM call, no tool loop ─────────────────────
+        audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
+        let wfResponse;
+        const llmT0 = Date.now();
+        try {
+          wfResponse = await llm.complete(tier, {
+            system:     params.system,
+            messages:   augmentedMessages,
+            tools:      undefined,
+            max_tokens: params.max_tokens,
+          });
+        } catch (err) {
+          console.error('[Workflow] LLM error:', err);
+          await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
+          return;
+        }
+        console.log(`[Workflow] LLM narrate: ${Date.now() - llmT0}ms, ${wfResponse.usage.output_tokens} tokens`);
+
+        tokenStats.total_input  += wfResponse.usage.input_tokens;
+        tokenStats.total_output += wfResponse.usage.output_tokens;
+        tokenStats.calls.unshift({
+          ts: Date.now(), node_id: event.node_id, tier,
+          model:         wfResponse.model,
+          input_tokens:  wfResponse.usage.input_tokens,
+          output_tokens: wfResponse.usage.output_tokens,
+        } satisfies TokenCallEntry);
+        if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+
+        memory.addTurn(event.session_id, agent.memory_ns, 'user',      payload.text);
+        memory.addTurn(event.session_id, agent.memory_ns, 'assistant', wfResponse.text);
+        const { text: safeWfText, count: wfCount } = scanSecrets(wfResponse.text);
+        if (wfCount > 0) audit.secretRedacted(event.node_id, wfCount);
+        await sendReply(event.node_id, safeWfText, agent.voice_id);
+
+        const today    = new Date().toISOString().slice(0, 10);
+        const timeStr  = new Date().toTimeString().slice(0, 5);
+        const uExcerpt = payload.text.slice(0, 120).replace(/\n/g, ' ');
+        const rExcerpt = wfResponse.text.slice(0, 250).replace(/\n/g, ' ');
+        memory.appendEpisodic(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`);
+        memory.indexMemory(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`).catch(() => {});
+        return;  // ← exits processEventInner; while loop below never runs
+      }
+
+      // ── Approval gate: requiresApproval=true ─────────────────────────────────
+      // Pre-fetch ran. Generate a preview (one-shot, no tools) then pause.
+      // User must confirm before the action executes.
+      if (workflowDef.requiresApproval) {
+        audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
+        let previewResponse;
+        try {
+          previewResponse = await llm.complete(tier, {
+            system:     params.system,
+            messages:   augmentedMessages,
+            tools:      undefined,
+            max_tokens: 512,
+          });
+        } catch (err) {
+          console.error('[Workflow] Approval preview LLM error:', err);
+          await sendReply(event.node_id, 'Could not generate preview. Try again.', agent.voice_id);
+          return;
+        }
+        tokenStats.total_input  += previewResponse.usage.input_tokens;
+        tokenStats.total_output += previewResponse.usage.output_tokens;
+        tokenStats.calls.unshift({ ts: Date.now(), node_id: event.node_id, tier, model: previewResponse.model, input_tokens: previewResponse.usage.input_tokens, output_tokens: previewResponse.usage.output_tokens } satisfies TokenCallEntry);
+        if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+
+        // Store pending approval and send preview + confirmation prompt
+        storePendingApproval(
+          event.session_id,
+          buildPendingApproval({
+            workflowDef,
+            assembled,
+            originalText:      payload.text,
+            augmentedMessages,
+          }),
+        );
+        const previewText = previewResponse.text.trim() +
+          '\n\nReply **confirm** to proceed or **cancel** to abort.';
+        await sendReply(event.node_id, previewText, agent.voice_id);
+        return;
+      }
+
+      // ── Assist mode: inject pre-fetched data, fall into LLM tool loop ────────
+      // The LLM receives the positions/orders data and calls the right action tool.
+      prefetchedMessages = augmentedMessages;
+    }
+    // ── End hybrid workflow shortcut ─────────────────────────────────────────
+
+    let messages: LLMMessage[] = prefetchedMessages ?? params.messages;
     let iterations = 0;
     const toolErrors: Array<{ tool: string; error: string }> = [];
 
@@ -635,6 +888,11 @@ async function main(): Promise<void> {
     console.log(`[Loop] tool_call: ${call.name}`);
     const args = call.args as Record<string, unknown>;
 
+    // Pulse status tool
+    if (call.name === 'pulse_status') {
+      return pulseRunner.getStatus();
+    }
+
     // Self-write tool
     if (call.name === 'create_skill') {
       const result = await selfWriteTool.execute(args as unknown as SelfWriteArgs, ctx);
@@ -759,7 +1017,15 @@ async function main(): Promise<void> {
   const workflowFireFn = async (name: string): Promise<void> => {
     await skills.execute('workflow_run', { name, payload: {}, async: true }, wfSkillCtx);
   };
-  const scheduler = new SchedulerEngine(config, memory, channels, triggerHeartbeat, workflowFireFn);
+  // ── Alert template — reusable LLM delivery layer for all monitors ─────────
+  const alertAgent    = agentRegistry.get('personal') ?? agentRegistry.getAll()[0]!;
+  const alertTemplate = new AlertTemplate(llm, skills, alertAgent, channels, agentRegistry);
+
+  // ── Pulse — extensible monitoring framework ───────────────────────────────
+  const pulseRunner = new PulseRunner(skills, alertTemplate)
+    .register(new TradeMonitor());
+  // To add future monitors: .register(new PriceAlertMonitor())
+  const scheduler = new SchedulerEngine(config, memory, channels, triggerHeartbeat, workflowFireFn, pulseRunner);
   scheduler.start();
 
   // ── REST API ───────────────────────────────────────────────────────────────
@@ -769,8 +1035,11 @@ async function main(): Promise<void> {
     canvasRenderer, triggerHeartbeat,
     heartbeatLog, startTime: START_TIME,
     orchestrator, tokenStats,
+    getPulseStatus: () => pulseRunner.getStatus(),
   });
   await restApi.start();
+
+  gary.start();
 
   console.log('\n✅ AURA Gateway started');
   console.log(`   ANP WebSocket : ws://${config.security.bind_address}:${config.security.anp_port}/anp`);
@@ -779,11 +1048,13 @@ async function main(): Promise<void> {
     console.log(`   Canvas WS     : ws://${config.security.bind_address}:${config.canvas.port}/canvas`);
   console.log(`   Agents loaded : ${agents.length}`);
   console.log(`   Skills loaded : ${skills.listSkills().length}`);
+  console.log(`   Gary pool     : ${parseInt(process.env.GARY_POOL_SIZE ?? '2', 10)} worker(s)`);
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`\n[Gateway] Received ${signal}, shutting down...`);
     scheduler.stop();
+    gary.shutdown();
     await restApi.stop();
     await canvasServer.stop();
     await channels.destroy();

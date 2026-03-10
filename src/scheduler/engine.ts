@@ -10,6 +10,8 @@ import type { ChannelManager } from '../channels/manager.js';
 export type HeartbeatFn = () => Promise<void>;
 export type WorkflowFireFn = (name: string) => Promise<void>;
 
+const PULSE_INTERVAL_SEC = parseInt(process.env.PULSE_INTERVAL_SEC ?? '30', 10);
+
 const WF_DB_PATH = path.join(os.homedir(), '.aura', 'memory', 'aura.db');
 
 /** Returns true if the 5-field cron expression matches the given date (minute granularity). */
@@ -45,10 +47,13 @@ function matchesCron(expr: string, date: Date): boolean {
  * - Heartbeat: runs every N minutes (from config), calls heartbeatFn
  * - Reminder poll: runs every reminder_check_sec seconds, fires due reminders
  */
+import type { PulseRunner } from './pulse.js';
+
 export class SchedulerEngine {
-  private heartbeatTask: cron.ScheduledTask | null = null;
-  private reminderTask:  cron.ScheduledTask | null = null;
+  private heartbeatTask:  cron.ScheduledTask | null = null;
+  private reminderTask:   cron.ScheduledTask | null = null;
   private wfScheduleTask: cron.ScheduledTask | null = null;
+  private pulseTask:      cron.ScheduledTask | null = null;
 
   constructor(
     private readonly config: GatewayConfig,
@@ -56,6 +61,7 @@ export class SchedulerEngine {
     private readonly channels: ChannelManager,
     private readonly heartbeatFn: HeartbeatFn,
     private readonly workflowFireFn?: WorkflowFireFn,
+    private readonly pulseRunner?: PulseRunner,
   ) {}
 
   start(): void {
@@ -93,7 +99,18 @@ export class SchedulerEngine {
       });
     }
 
-    console.log(`[Scheduler] Started: heartbeat every ${intervalMin}m, reminders every ${checkSec}s`);
+    // Pulse: every N seconds — pure code price checks, no LLM
+    if (this.pulseRunner) {
+      this.pulseTask = cron.schedule(`*/${PULSE_INTERVAL_SEC} * * * * *`, async () => {
+        try {
+          await this.pulseRunner!.check();
+        } catch (err) {
+          console.error('[Scheduler] Pulse error:', err);
+        }
+      });
+    }
+
+    console.log(`[Scheduler] Started: heartbeat every ${intervalMin}m, reminders every ${checkSec}s, pulse every ${PULSE_INTERVAL_SEC}s`);
   }
 
   private async checkReminders(): Promise<void> {
@@ -151,9 +168,11 @@ export class SchedulerEngine {
     this.heartbeatTask?.stop();
     this.reminderTask?.stop();
     this.wfScheduleTask?.stop();
+    this.pulseTask?.stop();
     this.heartbeatTask  = null;
     this.reminderTask   = null;
     this.wfScheduleTask = null;
+    this.pulseTask      = null;
     console.log('[Scheduler] Stopped');
   }
 }

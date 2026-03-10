@@ -376,6 +376,38 @@
     .hb-result-ok  { color: var(--teal); font-weight: 500; }
     .hb-result-err { color: var(--red);  font-weight: 500; }
 
+    /* ── Pulse panel ───────────────────────────────────────────────────── */
+    .pulse-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .pulse-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--text-faint); flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .pulse-dot.alive  { background: var(--teal); box-shadow: 0 0 6px rgba(0,212,170,0.5); animation: pulse-beat 2s infinite; }
+    .pulse-dot.stale  { background: #f0a500; box-shadow: 0 0 6px rgba(240,165,0,0.4); }
+    .pulse-dot.dead   { background: var(--red); }
+    @keyframes pulse-beat { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .pulse-meta { font-size: 12px; color: var(--text-faint); }
+    .pulse-meta span { color: var(--text-dim); }
+
+    .pulse-monitors { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .pulse-monitor-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px 14px;
+    }
+    .pulse-monitor-name { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .pulse-monitor-stat { font-size: 11px; color: var(--text-faint); line-height: 1.7; }
+    .pulse-monitor-stat .val { color: var(--text-dim); }
+    .pulse-monitor-alert { font-size: 11px; color: var(--red); margin-top: 4px; }
+
+    .pulse-alerts-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+    .pulse-alert-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .pulse-alert-row:last-child { border-bottom: none; }
+    .pulse-alert-ts { color: var(--text-faint); white-space: nowrap; flex-shrink: 0; }
+    .pulse-alert-monitor { color: var(--accent); font-weight: 600; flex-shrink: 0; min-width: 90px; }
+    .pulse-alert-text { color: var(--text-dim); flex: 1; }
+    .pulse-empty { text-align: center; color: var(--text-faint); padding: 20px; font-size: 12px; }
+
     /* ── Chat panel — same as original ─────────────────────────────────── */
     #panel-chat { overflow: hidden; }
 
@@ -537,6 +569,13 @@
     @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,85,102,0.4); } 50% { box-shadow: 0 0 0 6px rgba(255,85,102,0); } }
     #mic-transcript { display: none; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; background: rgba(124,106,245,0.1); border: 1px solid rgba(124,106,245,0.3); font-size: 12px; color: var(--accent); }
     #mic-transcript.show { display: flex; }
+
+    /* ── Workflow toggle ─────────────────────────────────────────────────── */
+    #workflow-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface3); color: var(--text-dim); font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0; transition: all 0.15s; white-space: nowrap; user-select: none; }
+    #workflow-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+    #workflow-btn.on  { background: rgba(124,106,245,0.12); border-color: var(--accent); color: var(--accent); }
+    #workflow-btn.off { background: var(--surface3); border-color: var(--border); color: var(--text-faint); text-decoration: line-through; }
+    #workflow-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 
     /* ── Canvas panel ─────────────────────────────────────────────────── */
     #canvas { width: 0; flex-shrink: 0; overflow: hidden; background: var(--surface); border-left: none; display: flex; flex-direction: column; transition: width 0.3s cubic-bezier(.4,0,.2,1); }
@@ -842,6 +881,14 @@
                 <button class="vtog-btn"              id="vtog-cloud" onclick="setVisionTier('vision')">Claude</button>
                 <button class="vtog-btn"              id="vtog-qwen"  onclick="setVisionTier('video')">Qwen</button>
               </div>
+              <!-- Workflow toggle — switches between hybrid orchestrator and pure LLM loop -->
+              <button id="workflow-btn" class="on" title="Toggle hybrid workflow orchestrator" onclick="toggleWorkflow()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="13 2 13 9 20 9"/><polyline points="11 22 11 15 4 15"/>
+                  <path d="M3 6l7-4 4 4 7-4"/><path d="M21 18l-7 4-4-4-7 4"/>
+                </svg>
+                Workflow
+              </button>
               <textarea id="input" rows="1" placeholder="Message…" autocomplete="off" spellcheck="true"></textarea>
               <button id="send" title="Send (Enter)" disabled>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -955,6 +1002,19 @@
               <tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:20px">No heartbeat data yet</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- ── Pulse section ──────────────────────────────────────────────── -->
+        <div class="status-section-title" style="margin-top:24px">Pulse Monitor</div>
+        <div class="pulse-header">
+          <div class="pulse-dot" id="pulse-dot"></div>
+          <div class="pulse-meta" id="pulse-meta">Not loaded</div>
+        </div>
+        <div class="pulse-monitors" id="pulse-monitors"></div>
+
+        <div class="status-section-title">Recent Pulse Alerts</div>
+        <div class="pulse-alerts-list" id="pulse-alerts-list">
+          <div class="pulse-empty">No pulse alerts yet</div>
         </div>
       </div>
     </div>
@@ -1470,6 +1530,18 @@ async function micToggle() {
   }
 }
 
+// ── Workflow toggle ──────────────────────────────────────────────────────────
+let workflowEnabled = true;
+function toggleWorkflow() {
+  workflowEnabled = !workflowEnabled;
+  const btn = document.getElementById('workflow-btn');
+  btn.classList.toggle('on',  workflowEnabled);
+  btn.classList.toggle('off', !workflowEnabled);
+  btn.title = workflowEnabled
+    ? 'Hybrid workflow ON — click to use pure LLM loop'
+    : 'Hybrid workflow OFF — click to re-enable';
+}
+
 // ── Vision model toggle ─────────────────────────────────────────────────────
 function setVisionTier(tier) {
   currentVisionTier = tier;
@@ -1485,9 +1557,11 @@ function doSend() {
   if (!text || !connected) return;
 
   // Build the outbound message — include snapshot + vision tier if one is staged
-  const outbound = pendingImage
-    ? { text, image_b64: pendingImage, vision_tier: currentVisionTier }
-    : { text };
+  const outbound = {
+    text,
+    ...(pendingImage       ? { image_b64: pendingImage, vision_tier: currentVisionTier } : {}),
+    ...(!workflowEnabled   ? { workflow_disabled: true } : {}),
+  };
 
   // Show user message with thumbnail if image attached
   if (pendingImage) {
@@ -1782,10 +1856,11 @@ function renderMemoryResults(results) {
 async function loadStatus() {
   hideErr('status-error', 'status-error-msg');
   try {
-    const [health, hbLog, skillsData] = await Promise.all([
+    const [health, hbLog, skillsData, pulseData] = await Promise.all([
       api('/api/health'),
       api('/api/heartbeat/log'),
       api('/api/skills').catch(() => []),
+      api('/api/pulse').catch(() => null),
     ]);
 
     // Refresh uptime seed while on this panel
@@ -1799,8 +1874,76 @@ async function loadStatus() {
     document.getElementById('stat-skills').textContent  = (skillsData || []).length;
 
     renderHeartbeatLog(hbLog || []);
+    renderPulse(pulseData);
   } catch (err) {
     showErr('status-error', 'status-error-msg', `Failed to load status: ${err.message}`);
+  }
+}
+
+function renderPulse(data) {
+  const dot  = document.getElementById('pulse-dot');
+  const meta = document.getElementById('pulse-meta');
+  const monitorsEl = document.getElementById('pulse-monitors');
+  const alertsEl   = document.getElementById('pulse-alerts-list');
+
+  if (!data) {
+    dot.className  = 'pulse-dot dead';
+    meta.innerHTML = 'Pulse data unavailable';
+    return;
+  }
+
+  // ── Dot state ──
+  const now = Date.now();
+  const age = data.lastTickTs ? now - data.lastTickTs : Infinity;
+  if (!data.running || !data.lastTickTs) {
+    dot.className = 'pulse-dot dead';
+  } else if (age < data.intervalSec * 3000) {
+    dot.className = 'pulse-dot alive';
+  } else {
+    dot.className = 'pulse-dot stale';
+  }
+
+  // ── Meta line ──
+  const lastCheck = data.lastTickTs
+    ? new Date(data.lastTickTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : 'never';
+  meta.innerHTML = `Every <span>${data.intervalSec}s</span> &nbsp;·&nbsp; Last tick <span>${lastCheck}</span> &nbsp;·&nbsp; Total alerts <span>${data.totalAlerts}</span>`;
+
+  // ── Monitor cards ──
+  if (!data.monitors || data.monitors.length === 0) {
+    monitorsEl.innerHTML = '<div style="color:var(--text-faint);font-size:12px">No monitors registered</div>';
+  } else {
+    monitorsEl.innerHTML = data.monitors.map(m => {
+      const lastCheck = m.lastCheckTs
+        ? new Date(m.lastCheckTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : '—';
+      const lastAlert = m.lastAlertTs
+        ? new Date(m.lastAlertTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : 'none';
+      const lastAlertText = m.lastAlertText
+        ? `<div class="pulse-monitor-alert">${esc(m.lastAlertText.slice(0, 60))}${m.lastAlertText.length > 60 ? '…' : ''}</div>`
+        : '';
+      return `<div class="pulse-monitor-card">
+        <div class="pulse-monitor-name">${esc(m.name)}</div>
+        <div class="pulse-monitor-stat">Last check: <span class="val">${esc(lastCheck)}</span></div>
+        <div class="pulse-monitor-stat">Alerts: <span class="val">${m.alertCount}</span> &nbsp; Last: <span class="val">${esc(lastAlert)}</span></div>
+        ${lastAlertText}
+      </div>`;
+    }).join('');
+  }
+
+  // ── Recent alerts ──
+  if (!data.recentAlerts || data.recentAlerts.length === 0) {
+    alertsEl.innerHTML = '<div class="pulse-empty">No pulse alerts yet</div>';
+  } else {
+    alertsEl.innerHTML = data.recentAlerts.map(a => {
+      const ts = new Date(a.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return `<div class="pulse-alert-row">
+        <span class="pulse-alert-ts">${esc(ts)}</span>
+        <span class="pulse-alert-monitor">${esc(a.monitor)}</span>
+        <span class="pulse-alert-text">${esc(a.text)}</span>
+      </div>`;
+    }).join('');
   }
 }
 

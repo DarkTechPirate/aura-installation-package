@@ -40,7 +40,7 @@ function lookupSender(nodeId: string): { name: string; notes?: string } | null {
   return null;
 }
 
-const MAX_MESSAGES = 20;
+const MAX_MESSAGES = 12;
 
 export interface ContextBuildParams {
   event:        ANPEvent;
@@ -65,8 +65,6 @@ export class ContextBuilder {
   async build(params: ContextBuildParams): Promise<LLMParams> {
     const { event, agent, shortTerm, semanticHits, toolDefs, config, userProfile, selfKnowledge, installedSkills, unloadedSkillNames } = params;
 
-    const now = new Date().toISOString();
-
     // ── Identity & persona ────────────────────────────────────────────────────
     let system = agent.persona.trim();
 
@@ -88,22 +86,13 @@ export class ContextBuilder {
               `technology powering you. If asked, say you are ${agent.name} and describe ` +
               `your capabilities below — nothing more.`;
 
-    // ── Capabilities summary ──────────────────────────────────────────────────
-    // Build from the actual loaded tool definitions so this always stays in sync.
-    // Canvas internals are excluded from the narrative; everything else is shown.
-    const nonInternalTools = toolDefs.filter(
-      t => !['canvas_clear','canvas_append','canvas_update','canvas_delete'].includes(t.name)
-    );
-
-    if (nonInternalTools.length > 0) {
-      system += `\n\nYour capabilities (tools you can use):`;
-      for (const t of nonInternalTools) {
-        system += `\n- ${t.name}: ${t.description}`;
-      }
-      system += `\n\nWhen asked what you can do, describe these capabilities naturally in ` +
-                `your own voice — do not list raw tool names. ALWAYS mention that you can ` +
-                `send messages to Telegram and other channels, and that you can create new ` +
-                `skills on the fly with create_skill.`;
+    // ── Capabilities hint ─────────────────────────────────────────────────────
+    // Tool definitions are already sent in the tools array — no need to repeat them here.
+    // Just tell the agent how to describe itself when asked.
+    if (toolDefs.length > 0) {
+      system += `\n\nYou have tools available. When asked what you can do, describe your ` +
+                `capabilities naturally — do not list raw tool names. Always mention you can ` +
+                `message Telegram contacts and create new skills on the fly.`;
     }
 
     // ── Gateway self-awareness ────────────────────────────────────────────────
@@ -156,6 +145,28 @@ export class ContextBuilder {
     system += `\n\nYour assigned channels (from agents.yaml): ${agent.channels.filter(c => c !== '__default__').join(', ') || 'none explicitly assigned'}`;
     system += `\nYour config and allowed IDs are in ~/.aura/config.yaml — use config_read or allowed_ids_add/remove to inspect or change them.`;
 
+    // ── Agent behaviour rules (sourced from Cursor, Windsurf, Gemini CLI) ────────
+    system += `\n\nAGENT BEHAVIOUR (follow these at all times):`;
+    system += `\n- Complete the user's request fully before stopping. Do not ask clarifying questions if you can find the answer yourself using your tools.`;
+    system += `\n- Call tools only when necessary. If you already know the answer, reply directly without using a tool.`;
+    system += `\n- Before running any shell command or file operation that modifies state, briefly state what you are about to do and why — then do it immediately.`;
+    system += `\n- Never silently retry a cancelled or failed action. If something fails, report it and ask how to proceed.`;
+    system += `\n- When debugging, address the root cause — not the symptom. Add logging to track state rather than guessing.`;
+    system += `\n- When using a tool, do not narrate it — just use it. Avoid "I will now call..." preamble.`;
+
+    // ── Response style ────────────────────────────────────────────────────────
+    system += `\n\nRESPONSE STYLE:`;
+    system += `\n- Be concise but natural. Never waffle — get to the point, but let your personality come through. Dry wit is always welcome.`;
+    system += `\n- Never open with "Certainly!", "Sure!", "Of course!", "Great!" or similar hollow affirmations. Just answer.`;
+    system += `\n- Match the energy of the conversation — casual when the user is casual, precise when they need precision.`;
+    system += `\n- Use markdown only when it genuinely helps (code blocks, structured lists). Plain prose for everything else.`;
+
+    // ── Memory rules ─────────────────────────────────────────────────────────
+    system += `\n\nMEMORY:`;
+    system += `\n- Proactively save important user context (preferences, habits, names, goals, corrections) to memory without being asked.`;
+    system += `\n- Do not ask permission before saving a memory — just save it. The user can review and reject saved memories.`;
+    system += `\n- If the user corrects you on something, update your memory immediately so the mistake does not repeat.`;
+
     // ── Skill creation rules ──────────────────────────────────────────────────
     system += `\n\nSKILL CREATION RULES (critical):`;
     system += `\n- ALWAYS use create_skill to create new skills — never write skill files manually.`;
@@ -189,15 +200,6 @@ export class ContextBuilder {
                 `Never refuse to use a tool that is present in your tool list based on a memory entry.`;
     }
 
-    // ── Time & memory ─────────────────────────────────────────────────────────
-    system += `\n\nCurrent time: ${now}`;
-
-    if (semanticHits.length > 0) {
-      // Cap to 5 hits × 400 chars each — enough context without flooding
-      const capped = semanticHits.slice(0, 5).map(h => h.slice(0, 400));
-      system += `\n\nRelevant memory:\n${capped.join('\n')}`;
-    }
-
     // ── Message history ───────────────────────────────────────────────────────
     // Token budget: keep only last MAX_MESSAGES turns
     let messages = shortTerm.slice(-MAX_MESSAGES);
@@ -215,6 +217,28 @@ export class ContextBuilder {
         }
         messages = [...messages, userMsg];
       }
+    }
+
+    // ── Volatile context injection ────────────────────────────────────────────
+    // Current time and semantic memory hits are injected into the first user
+    // message rather than the system prompt. This keeps the system prompt
+    // byte-identical across turns so Claude's prompt cache can be reused.
+    const now = new Date().toISOString();
+    const volatileParts: string[] = [`[Context: Current time: ${now}]`];
+    if (semanticHits.length > 0) {
+      const capped = semanticHits.slice(0, 5).map(h => h.slice(0, 400));
+      volatileParts.push(`[Relevant memory:\n${capped.join('\n')}]`);
+    }
+    const volatilePrefix = volatileParts.join('\n') + '\n\n';
+
+    // Prepend to the last (current) user message — not the oldest one in history
+    const lastUserIdx = messages.reduceRight((found, m, i) => found === -1 && m.role === 'user' ? i : found, -1);
+    if (lastUserIdx !== -1 && typeof messages[lastUserIdx].content === 'string') {
+      messages = [
+        ...messages.slice(0, lastUserIdx),
+        { ...messages[lastUserIdx], content: volatilePrefix + messages[lastUserIdx].content },
+        ...messages.slice(lastUserIdx + 1),
+      ];
     }
 
     return {

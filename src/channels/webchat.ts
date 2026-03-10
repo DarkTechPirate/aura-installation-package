@@ -138,7 +138,8 @@ export class WebChatAdapter implements ChannelAdapter {
         }
 
         // ── Text / image message ──
-        const text = msg['text'] as string | undefined;
+        const text              = msg['text'] as string | undefined;
+        const workflow_disabled = msg['workflow_disabled'] === true;
         if (!text) return;
 
         const event: ANPEvent = {
@@ -147,7 +148,8 @@ export class WebChatAdapter implements ChannelAdapter {
           payload: {
             text,
             routing_hint: image_b64 ? vision_tier as import('../anp/types.js').RoutingHint : 'simple',
-            ...(image_b64 ? { image_b64 } : {}),
+            ...(image_b64           ? { image_b64 }           : {}),
+            ...(workflow_disabled   ? { workflow_disabled }    : {}),
           },
         };
         for (const h of this.handlers) h(event);
