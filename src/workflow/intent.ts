@@ -36,8 +36,8 @@ const INSTRUMENT_ALIASES: Array<[RegExp, string]> = [
 const SIDE_BUY  = /\b(buy|long|bullish|go long|buying)\b/i;
 const SIDE_SELL = /\b(sell|short|bearish|go short|selling)\b/i;
 
-const MARKET_SCAN_RE = /\b(scan|explore.?market|what should i trade|best setup|opportunit|top picks?|watch.?list|what.?s hot|find.?trade|market overview)\b/i;
-const ACCOUNT_RE     = /\b(my account|balance|portfolio|positions|how am i doing|p&?l|profit.?loss|drawdown|equity|account review|open trades?|account summary)\b/i;
+const MARKET_SCAN_RE = /\b(scan|explore|market|what should i trade|best setup|opportunit|top picks?|watch.?list|what.?s hot|find.?trade|market overview|market check|market update|hows.?the|how.?is.?the|market condition|trade today|trading today|any setup|good trade)\b/i;
+const ACCOUNT_RE     = /\b(my account|balance|portfolio|positions|how am i doing|p&?l|profit.?loss|drawdown|equity|account review|open trades?|account summary|my trades?|my profit|my loss)\b/i;
 
 function extractInstrument(text: string): string | undefined {
   for (const [re, symbol] of INSTRUMENT_ALIASES) {
@@ -65,13 +65,9 @@ export function detectIntent(text: string): WorkflowMatch | null {
     return { intent: 'pre_trade_check', instrument, side };
   }
 
-  // 2. quick_quote — instrument present, no directional intent
-  if (instrument && !side) {
-    // Only trigger quote if the user is asking about price, not a general question
-    const priceAsk = /\b(price|quote|rate|how much|worth|value|current|live|now|bid|ask)\b/i;
-    if (priceAsk.test(text) || !MARKET_SCAN_RE.test(text)) {
-      return { intent: 'quick_quote', instrument };
-    }
+  // 2. quick_quote — specific instrument mentioned, no side, no broad market scan trigger
+  if (instrument && !side && !MARKET_SCAN_RE.test(text)) {
+    return { intent: 'quick_quote', instrument };
   }
 
   // 3. market_scan
