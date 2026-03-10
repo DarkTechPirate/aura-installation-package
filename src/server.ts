@@ -671,9 +671,6 @@ async function main(): Promise<void> {
 
       if (!workflowDef.allowTools) {
         // ── Narrate mode: one-shot LLM call, no tool loop ─────────────────────
-        // Cap workflow narrations — main latency driver on local models.
-        // 800 gives enough room for multi-TF market briefings (~400 words).
-        const WF_MAX_TOKENS = 800;
         audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
         let wfResponse;
         const llmT0 = Date.now();
@@ -682,7 +679,7 @@ async function main(): Promise<void> {
             system:     params.system,
             messages:   augmentedMessages,
             tools:      undefined,
-            max_tokens: WF_MAX_TOKENS,
+            max_tokens: params.max_tokens,
           });
         } catch (err) {
           console.error('[Workflow] LLM error:', err);
