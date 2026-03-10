@@ -20,6 +20,13 @@ export interface WorkflowDef {
   parallel:       boolean;   // true → Promise.allSettled; false → sequential + chaining
   steps:          WorkflowStep[];
   llmInstruction: string;    // appended after assembled data to guide the LLM reply
+  /**
+   * When false (default): orchestrator runs all steps, makes one-shot LLM call (no tools).
+   * When true: orchestrator only pre-fetches data, injects it into context, then falls
+   * into the normal LLM tool loop. Use for intents requiring LLM reasoning to select
+   * the right record (e.g. close a specific trade by instrument name).
+   */
+  allowTools:     boolean;
 }
 
 /**
@@ -33,8 +40,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
 
     case 'market_scan':
       return {
-        intent:   'market_scan',
-        parallel: true,
+        intent:      'market_scan',
+        parallel:    true,
+        allowTools:  false,
         steps: [
           {
             toolName: 'forex_scan',
@@ -54,8 +62,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
 
     case 'account_review':
       return {
-        intent:   'account_review',
-        parallel: true,
+        intent:      'account_review',
+        parallel:    true,
+        allowTools:  false,
         steps: [
           { toolName: 'forex_account',   args: {} },
           { toolName: 'forex_positions', args: {} },
@@ -71,8 +80,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
     case 'pre_trade_check': {
       if (!match.instrument || !match.side) return null;
       return {
-        intent:   'pre_trade_check',
-        parallel: false,
+        intent:      'pre_trade_check',
+        parallel:    false,
+        allowTools:  false,
         steps: [
           {
             toolName: 'forex_pre_trade',
@@ -89,8 +99,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
     case 'quick_quote': {
       if (!match.instrument) return null;
       return {
-        intent:   'quick_quote',
-        parallel: false,
+        intent:      'quick_quote',
+        parallel:    false,
+        allowTools:  false,
         steps: [
           {
             toolName: 'forex_quote',
@@ -107,56 +118,44 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
 
     case 'close_trade':
       return {
-        intent:   'close_trade',
-        parallel: false,
+        intent:      'close_trade',
+        parallel:    false,
+        allowTools:  true,   // LLM picks the right trade_id from positions and calls forex_close
         steps: [
           { id: 'positions', toolName: 'forex_positions', args: {} },
-          {
-            id:       'close',
-            toolName: 'forex_close',
-            // Closes the first open trade. LLM narrates what was closed.
-            args: { trade_id: '$positions.trades[0].id' },
-          },
         ],
         llmInstruction:
-          'Confirm the trade has been closed. State the instrument, units, and realised P&L if available. ' +
-          'If the close failed (error in result), explain what went wrong and what to try instead.',
+          'The user wants to close a trade. Using the positions data above, identify the correct trade ' +
+          'by instrument name, then call forex_close with that trade_id. ' +
+          'If multiple trades match or the instrument is ambiguous, ask the user to confirm which one.',
       };
 
     case 'cancel_order':
       return {
-        intent:   'cancel_order',
-        parallel: false,
+        intent:      'cancel_order',
+        parallel:    false,
+        allowTools:  true,   // LLM picks the right order_id and calls forex_cancel
         steps: [
           { id: 'orders', toolName: 'forex_orders', args: {} },
-          {
-            id:       'cancel',
-            toolName: 'forex_cancel',
-            // Cancels the first pending order. LLM confirms or escalates if multiple.
-            args: { order_id: '$orders.orders[0].id' },
-          },
         ],
         llmInstruction:
-          'Confirm the order has been cancelled, naming the instrument and price. ' +
-          'If multiple orders exist in the data, mention them and ask which to cancel next. ' +
-          'If the cancel failed, explain why.',
+          'The user wants to cancel an order. Using the orders data above, identify the correct order ' +
+          'by instrument name or price, then call forex_cancel with that order_id. ' +
+          'If multiple orders exist and the intent is ambiguous, list them and ask which to cancel.',
       };
 
     case 'update_sltp': {
       return {
-        intent:   'update_sltp',
-        parallel: false,
+        intent:      'update_sltp',
+        parallel:    false,
+        allowTools:  true,   // LLM reads positions, asks for values if missing, then calls forex_update_sltp
         steps: [
           { id: 'positions', toolName: 'forex_positions', args: {} },
-          // LLM will receive full positions data and the user's original message.
-          // It will narrate the current SL/TP and suggest or confirm updates.
-          // Actual forex_update_sltp requires new values the user must specify,
-          // so we stop after fetching positions and let the LLM ask for confirmation.
         ],
         llmInstruction:
-          'Show the current open trades with their SL and TP levels. ' +
-          'Ask the user which trade to update and what the new SL/TP values should be. ' +
-          'Do not execute the update without explicit confirmation of the new values.',
+          'The user wants to update SL/TP on a trade. Using the positions data above, identify the correct ' +
+          'trade. If the user has specified new SL/TP values, call forex_update_sltp immediately. ' +
+          'If values are missing, show current SL/TP and ask for the new ones before acting.',
       };
     }
 
@@ -164,8 +163,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
 
     case 'daily_brief':
       return {
-        intent:   'daily_brief',
-        parallel: true,
+        intent:      'daily_brief',
+        parallel:    true,
+        allowTools:  false,
         steps: [
           { toolName: 'calendar_list_events', args: { days_ahead: 1 } },
           { toolName: 'list_reminders',       args: {} },
@@ -178,8 +178,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
 
     case 'github_review':
       return {
-        intent:   'github_review',
-        parallel: true,
+        intent:      'github_review',
+        parallel:    true,
+        allowTools:  false,
         steps: [
           { toolName: 'list_prs',    args: { state: 'open' } },
           { toolName: 'list_issues', args: { state: 'open' } },
@@ -195,8 +196,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
       const query = match.query || '';
       if (!query) return null;
       return {
-        intent:   'web_research',
-        parallel: false,
+        intent:      'web_research',
+        parallel:    false,
+        allowTools:  false,
         steps: [
           {
             id:       'search',

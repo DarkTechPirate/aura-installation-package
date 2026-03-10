@@ -509,71 +509,90 @@ async function main(): Promise<void> {
     });
 
     // ── Hybrid workflow shortcut ──────────────────────────────────────────────
-    // Detect known structured intents and run hardcoded tool steps in parallel.
-    // One LLM call writes the reply — the tool loop below never runs for these.
+    // Detect known structured intents and pre-fetch tool data deterministically.
+    //
+    // allowTools=false (narrate mode): orchestrator runs all steps → one-shot LLM
+    //   call with tools disabled. Fastest path; LLM just narrates the data.
+    //   Used for: market_scan, account_review, quick_quote, pre_trade_check, daily_brief, etc.
+    //
+    // allowTools=true (assist mode): orchestrator pre-fetches lookup data → injects
+    //   into context → falls into the normal LLM tool loop. LLM reasons over the
+    //   fetched data and calls the action tool with the correct record.
+    //   Used for: close_trade, cancel_order, update_sltp (require LLM to pick right ID).
+    //
     // Unmatched intents fall through to the existing tool loop unchanged.
-    const intentMatch  = detectIntent(payload.text);
-    const workflowDef  = intentMatch ? resolveWorkflow(intentMatch) : null;
+    const intentMatch = detectIntent(payload.text);
+    const workflowDef = intentMatch ? resolveWorkflow(intentMatch) : null;
+
+    // prefetchedMessages: set when allowTools=true so the LLM loop starts with
+    // pre-fetched data already injected into the user message.
+    let prefetchedMessages: LLMMessage[] | null = null;
 
     if (workflowDef) {
-      console.log(`[Workflow] Intent: ${intentMatch!.intent} — ${workflowDef.steps.length} step(s) (parallel: ${workflowDef.parallel})`);
+      console.log(`[Workflow] Intent: ${intentMatch!.intent} — ${workflowDef.steps.length} step(s) (parallel: ${workflowDef.parallel}, allowTools: ${workflowDef.allowTools})`);
       const assembled = await runWorkflow(workflowDef, ctx, executeToolCall, event.session_id);
 
       const lastUserContent = params.messages.at(-1)?.content ?? payload.text;
       const augmentedContent =
         lastUserContent + '\n\n' +
-        '[Workflow data — use this to write your reply, do not show raw JSON]\n' +
+        '[Pre-fetched data — use this to complete the request, do not show raw JSON]\n' +
         assembled + '\n\n' +
         workflowDef.llmInstruction;
 
-      const workflowMessages: LLMMessage[] = [
+      const augmentedMessages: LLMMessage[] = [
         ...params.messages.slice(0, -1),
         { role: 'user' as const, content: augmentedContent },
       ];
 
-      audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
-      let wfResponse;
-      try {
-        wfResponse = await llm.complete(tier, {
-          system:     params.system,
-          messages:   workflowMessages,
-          tools:      undefined,   // one-shot reply — no tool loop
-          max_tokens: params.max_tokens,
-        });
-      } catch (err) {
-        console.error('[Workflow] LLM error:', err);
-        await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
-        return;
+      if (!workflowDef.allowTools) {
+        // ── Narrate mode: one-shot LLM call, no tool loop ─────────────────────
+        audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
+        let wfResponse;
+        try {
+          wfResponse = await llm.complete(tier, {
+            system:     params.system,
+            messages:   augmentedMessages,
+            tools:      undefined,
+            max_tokens: params.max_tokens,
+          });
+        } catch (err) {
+          console.error('[Workflow] LLM error:', err);
+          await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
+          return;
+        }
+
+        tokenStats.total_input  += wfResponse.usage.input_tokens;
+        tokenStats.total_output += wfResponse.usage.output_tokens;
+        tokenStats.calls.unshift({
+          ts: Date.now(), node_id: event.node_id, tier,
+          model:         wfResponse.model,
+          input_tokens:  wfResponse.usage.input_tokens,
+          output_tokens: wfResponse.usage.output_tokens,
+        } satisfies TokenCallEntry);
+        if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+
+        memory.addTurn(event.session_id, agent.memory_ns, 'user',      payload.text);
+        memory.addTurn(event.session_id, agent.memory_ns, 'assistant', wfResponse.text);
+        const { text: safeWfText, count: wfCount } = scanSecrets(wfResponse.text);
+        if (wfCount > 0) audit.secretRedacted(event.node_id, wfCount);
+        await sendReply(event.node_id, safeWfText, agent.voice_id);
+
+        const today    = new Date().toISOString().slice(0, 10);
+        const timeStr  = new Date().toTimeString().slice(0, 5);
+        const uExcerpt = payload.text.slice(0, 120).replace(/\n/g, ' ');
+        const rExcerpt = wfResponse.text.slice(0, 250).replace(/\n/g, ' ');
+        memory.appendEpisodic(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`);
+        memory.indexMemory(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`).catch(() => {});
+        return;  // ← exits processEventInner; while loop below never runs
       }
 
-      tokenStats.total_input  += wfResponse.usage.input_tokens;
-      tokenStats.total_output += wfResponse.usage.output_tokens;
-      tokenStats.calls.unshift({
-        ts: Date.now(), node_id: event.node_id, tier,
-        model:         wfResponse.model,
-        input_tokens:  wfResponse.usage.input_tokens,
-        output_tokens: wfResponse.usage.output_tokens,
-      } satisfies TokenCallEntry);
-      if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
-
-      memory.addTurn(event.session_id, agent.memory_ns, 'user',      payload.text);
-      memory.addTurn(event.session_id, agent.memory_ns, 'assistant', wfResponse.text);
-      const { text: safeWfText, count: wfCount } = scanSecrets(wfResponse.text);
-      if (wfCount > 0) audit.secretRedacted(event.node_id, wfCount);
-      await sendReply(event.node_id, safeWfText, agent.voice_id);
-
-      const today       = new Date().toISOString().slice(0, 10);
-      const timeStr     = new Date().toTimeString().slice(0, 5);
-      const uExcerpt    = payload.text.slice(0, 120).replace(/\n/g, ' ');
-      const rExcerpt    = wfResponse.text.slice(0, 250).replace(/\n/g, ' ');
-      const epLine      = `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`;
-      memory.appendEpisodic(agent.memory_ns, today, epLine);
-      memory.indexMemory(agent.memory_ns, today, epLine).catch(() => {});
-      return;  // ← exits processEventInner; while loop below never runs
+      // ── Assist mode: inject pre-fetched data, fall into LLM tool loop ────────
+      // The LLM receives the positions/orders data and calls the right action tool.
+      prefetchedMessages = augmentedMessages;
     }
     // ── End hybrid workflow shortcut ─────────────────────────────────────────
 
-    let messages: LLMMessage[] = params.messages;
+    let messages: LLMMessage[] = prefetchedMessages ?? params.messages;
     let iterations = 0;
     const toolErrors: Array<{ tool: string; error: string }> = [];
 
