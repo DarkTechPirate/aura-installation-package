@@ -48,7 +48,7 @@ const SIDE_SELL = /\b(sell|short|bearish|go short|selling)\b/i;
 
 // ── Forex intent patterns ─────────────────────────────────────────────────────
 const MARKET_SCAN_RE = /\b(scan|explore|market|what should i trade|best setup|opportunit|top picks?|watch.?list|what.?s hot|find.?trade|market overview|market check|market update|hows.?the|how.?is.?the|market condition|trade today|trading today|any setup|good trade)\b/i;
-const ACCOUNT_RE     = /\b(my account|balance|portfolio|positions|how am i doing|p&?l|profit.?loss|drawdown|equity|account review|open trades?|account summary|my trades?|my profit|my loss)\b/i;
+const ACCOUNT_RE     = /\b(my account|balance|portfolio|positions|how am i doing|p&?l|profit.?loss|drawdown|equity|account review|open trades?|account summary|my trades?|my profit|my loss|analys[ei]s? (the |my )?(trade|position|portfolio)|trade analysis|position analysis|analys[ei]s? trade|check (the |my )?(trade|position|portfolio|account))\b/i;
 const CLOSE_TRADE_RE = /\b(close (my |the |a )?(trade|position|pos)|exit (trade|position|my trade)|close out)\b/i;
 const CANCEL_ORDER_RE = /\b(cancel (my |the |an? )?(order|pending)|remove order|delete order|drop (the |my )?order)\b/i;
 const UPDATE_SLTP_RE  = /\b(move (sl|tp|stop|take.?profit)|update (sl|tp|stop.?loss|take.?profit)|adjust (sl|tp|stop|take.?profit)|change (stop|sl|tp|take.?profit)|set (new )?(sl|tp|stop|take.?profit))\b/i;

@@ -29,7 +29,8 @@ const logger = createLogger('Gary');
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
 const GARY_ENTRY = path.resolve(__dirname, '../../gary.ts');
 const POOL_SIZE  = parseInt(process.env.GARY_POOL_SIZE ?? '2', 10);
-const RESTART_DELAY_MS = 1_000;
+const RESTART_DELAY_MS  = 1_000;
+const TOOL_TIMEOUT_MS   = 30_000; // max 30s per tool call — prevents infinite hangs
 
 type ExecuteFn = (call: ToolCall, ctx: SkillContext, sessionId: string) => Promise<unknown>;
 
@@ -139,14 +140,21 @@ class GaryManager {
       if (msg.type === 'tool_call') {
         if (!worker.execute || !worker.ctx || !worker.sessionId) return;
         try {
-          const result = await worker.execute(
-            { id: msg.id, name: msg.toolName, args: msg.args },
-            worker.ctx,
-            worker.sessionId,
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Tool call timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)
           );
+          const result = await Promise.race([
+            worker.execute(
+              { id: msg.id, name: msg.toolName, args: msg.args },
+              worker.ctx,
+              worker.sessionId,
+            ),
+            timeoutPromise,
+          ]);
           child.stdin!.write(JSON.stringify({ type: 'tool_result', id: msg.id, result }) + '\n');
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
+          logger.warn('Gary tool call error', { tool: msg.toolName, error });
           child.stdin!.write(JSON.stringify({ type: 'tool_result', id: msg.id, error }) + '\n');
         }
         return;

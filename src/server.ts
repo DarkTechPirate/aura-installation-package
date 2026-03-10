@@ -646,8 +646,10 @@ async function main(): Promise<void> {
     let prefetchedMessages: LLMMessage[] | null = null;
 
     if (workflowDef) {
+      const garyT0 = Date.now();
       console.log(`[Gary] Intent: ${intentMatch!.intent}`);
       const garyResult = await gary.run(intentMatch!, ctx, executeToolCall, event.session_id);
+      console.log(`[Gary] Workflow done: ${Date.now() - garyT0}ms (ok=${garyResult.ok})`);
       if (!garyResult.ok) {
         console.error(`[Gary] Error: ${garyResult.output}`);
         await sendReply(event.node_id, `⚠️ Workflow error: ${garyResult.output}`, event.session_id);
@@ -669,20 +671,25 @@ async function main(): Promise<void> {
 
       if (!workflowDef.allowTools) {
         // ── Narrate mode: one-shot LLM call, no tool loop ─────────────────────
+        // Cap at 600 tokens — workflow narrations are short-form summaries.
+        // This is the main latency driver on local models, so keep it tight.
+        const WF_MAX_TOKENS = 600;
         audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
         let wfResponse;
+        const llmT0 = Date.now();
         try {
           wfResponse = await llm.complete(tier, {
             system:     params.system,
             messages:   augmentedMessages,
             tools:      undefined,
-            max_tokens: params.max_tokens,
+            max_tokens: WF_MAX_TOKENS,
           });
         } catch (err) {
           console.error('[Workflow] LLM error:', err);
           await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
           return;
         }
+        console.log(`[Workflow] LLM narrate: ${Date.now() - llmT0}ms, ${wfResponse.usage.output_tokens} tokens`);
 
         tokenStats.total_input  += wfResponse.usage.input_tokens;
         tokenStats.total_output += wfResponse.usage.output_tokens;
