@@ -538,6 +538,13 @@
     #mic-transcript { display: none; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; background: rgba(124,106,245,0.1); border: 1px solid rgba(124,106,245,0.3); font-size: 12px; color: var(--accent); }
     #mic-transcript.show { display: flex; }
 
+    /* ── Workflow toggle ─────────────────────────────────────────────────── */
+    #workflow-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface3); color: var(--text-dim); font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0; transition: all 0.15s; white-space: nowrap; user-select: none; }
+    #workflow-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+    #workflow-btn.on  { background: rgba(124,106,245,0.12); border-color: var(--accent); color: var(--accent); }
+    #workflow-btn.off { background: var(--surface3); border-color: var(--border); color: var(--text-faint); text-decoration: line-through; }
+    #workflow-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+
     /* ── Canvas panel ─────────────────────────────────────────────────── */
     #canvas { width: 0; flex-shrink: 0; overflow: hidden; background: var(--surface); border-left: none; display: flex; flex-direction: column; transition: width 0.3s cubic-bezier(.4,0,.2,1); }
     #canvas.open { width: 380px; border-left: 1px solid var(--border); }
@@ -842,6 +849,14 @@
                 <button class="vtog-btn"              id="vtog-cloud" onclick="setVisionTier('vision')">Claude</button>
                 <button class="vtog-btn"              id="vtog-qwen"  onclick="setVisionTier('video')">Qwen</button>
               </div>
+              <!-- Workflow toggle — switches between hybrid orchestrator and pure LLM loop -->
+              <button id="workflow-btn" class="on" title="Toggle hybrid workflow orchestrator" onclick="toggleWorkflow()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="13 2 13 9 20 9"/><polyline points="11 22 11 15 4 15"/>
+                  <path d="M3 6l7-4 4 4 7-4"/><path d="M21 18l-7 4-4-4-7 4"/>
+                </svg>
+                Workflow
+              </button>
               <textarea id="input" rows="1" placeholder="Message…" autocomplete="off" spellcheck="true"></textarea>
               <button id="send" title="Send (Enter)" disabled>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1470,6 +1485,18 @@ async function micToggle() {
   }
 }
 
+// ── Workflow toggle ──────────────────────────────────────────────────────────
+let workflowEnabled = true;
+function toggleWorkflow() {
+  workflowEnabled = !workflowEnabled;
+  const btn = document.getElementById('workflow-btn');
+  btn.classList.toggle('on',  workflowEnabled);
+  btn.classList.toggle('off', !workflowEnabled);
+  btn.title = workflowEnabled
+    ? 'Hybrid workflow ON — click to use pure LLM loop'
+    : 'Hybrid workflow OFF — click to re-enable';
+}
+
 // ── Vision model toggle ─────────────────────────────────────────────────────
 function setVisionTier(tier) {
   currentVisionTier = tier;
@@ -1485,9 +1512,11 @@ function doSend() {
   if (!text || !connected) return;
 
   // Build the outbound message — include snapshot + vision tier if one is staged
-  const outbound = pendingImage
-    ? { text, image_b64: pendingImage, vision_tier: currentVisionTier }
-    : { text };
+  const outbound = {
+    text,
+    ...(pendingImage       ? { image_b64: pendingImage, vision_tier: currentVisionTier } : {}),
+    ...(!workflowEnabled   ? { workflow_disabled: true } : {}),
+  };
 
   // Show user message with thumbnail if image attached
   if (pendingImage) {

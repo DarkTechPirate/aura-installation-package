@@ -521,7 +521,7 @@ async function main(): Promise<void> {
     //   Used for: close_trade, cancel_order, update_sltp (require LLM to pick right ID).
     //
     // Unmatched intents fall through to the existing tool loop unchanged.
-    const intentMatch = detectIntent(payload.text);
+    const intentMatch = payload.workflow_disabled ? null : detectIntent(payload.text);
     const workflowDef = intentMatch ? resolveWorkflow(intentMatch) : null;
 
     // prefetchedMessages: set when allowTools=true so the LLM loop starts with
