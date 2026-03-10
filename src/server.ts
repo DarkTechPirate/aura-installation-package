@@ -30,6 +30,16 @@ import type { ToolDefinition } from './llm/types.js';
 import { detectIntent }    from './workflow/intent.js';
 import { resolveWorkflow } from './workflow/workflows.js';
 import { runWorkflow }     from './workflow/runner.js';
+import { scoreMessage }    from './llm/scorer.js';
+import {
+  buildPendingApproval,
+  consumePendingApproval,
+  hasPendingApproval,
+  isConfirmation,
+  isCancellation,
+  pruneExpiredApprovals,
+  storePendingApproval,
+} from './workflow/approvals.js';
 
 // ── Core skills always loaded regardless of message content ──────────────────
 const CORE_SKILLS = new Set([
@@ -246,7 +256,7 @@ async function main(): Promise<void> {
 
   const rateLimiter = new RateLimiter(20, 60_000);
   // Cleanup stale rate limit buckets and sessions every 10 minutes
-  setInterval(() => { rateLimiter.cleanup(); memory.cleanupSessions(); purgeExpiredSessionSkills(); }, 600_000);
+  setInterval(() => { rateLimiter.cleanup(); memory.cleanupSessions(); purgeExpiredSessionSkills(); pruneExpiredApprovals(); }, 600_000);
   const extractor = new MemoryExtractor(llm, memory);
   const contextBuilder = new ContextBuilder();
 
@@ -462,10 +472,106 @@ async function main(): Promise<void> {
       payload.text = `${desc}\n${payload.text}`;
     }
 
-    const agent   = agentRegistry.resolve(event.node_id);
-    const tier    = payload.image_b64
+    const agent = agentRegistry.resolve(event.node_id);
+
+    // ── Approval gate — check before anything else ────────────────────────────
+    // If the user has a pending approval (from a requiresApproval workflow),
+    // intercept this message and either resume or cancel the pending action.
+    if (hasPendingApproval(event.session_id)) {
+      if (isConfirmation(payload.text)) {
+        const pending = consumePendingApproval(event.session_id);
+        if (pending) {
+          console.log(`[Workflow] Approval confirmed for intent: ${pending.workflowDef.intent}`);
+          // Resume: run LLM loop with pre-fetched data + confirmation injected
+          const confirmMessages: LLMMessage[] = [
+            ...pending.augmentedMessages.slice(0, -1),
+            {
+              role: 'user' as const,
+              content: pending.augmentedMessages.at(-1)?.content +
+                '\n\n[User confirmed — proceed with the action now.]',
+            },
+          ];
+          // Fall through to LLM loop with the confirmed messages
+          const shortTerm     = memory.getShortTerm(event.session_id);
+          const semanticHits  = await memory.search(agent.memory_ns, pending.originalText).catch(() => []);
+          const userProfile   = memory.readProfile(agent.memory_ns);
+          const selfKnowledge = memory.readSelf(agent.memory_ns);
+          const { toolDefs: skillToolDefs, unloadedSkillNames } = await smartLoadSkills(
+            agent.skills ?? [], pending.originalText, event.session_id, skills, memory,
+          );
+          const rawToolsR = [
+            ...skillToolDefs, selfWriteTool.toolDef, orchestrator.getToolDef(),
+            ...canvasToolDefs, ...memoryToolDefs, ...proactiveTools.getToolDefs(),
+          ];
+          const seenR = new Set<string>();
+          const allToolsR = rawToolsR.filter(t => { if (seenR.has(t.name)) return false; seenR.add(t.name); return true; });
+          const ctxR  = buildSkillContext(event, agent.memory_ns);
+          const paramsR = await contextBuilder.build({
+            event, agent, shortTerm, semanticHits, toolDefs: allToolsR, config,
+            userProfile, selfKnowledge, unloadedSkillNames,
+            installedSkills: skills.listSkills().filter(s => s.enabled).map(s => ({ name: s.name, description: s.description })),
+          });
+
+          let messagesR: LLMMessage[] = confirmMessages.length > 0 ? confirmMessages : paramsR.messages;
+          let iterR = 0;
+          while (iterR < MAX_TOOL_ITERATIONS) {
+            iterR++;
+            audit.llmCall(event.node_id, agent.memory_ns, agent.llm_tier, agent.llm_tier);
+            let respR;
+            try {
+              respR = await llm.complete(agent.llm_tier, { system: paramsR.system, messages: messagesR, tools: paramsR.tools, max_tokens: paramsR.max_tokens });
+            } catch (err) {
+              console.error('[Approval] LLM error:', err);
+              await sendReply(event.node_id, 'Error resuming after approval. Try again.', agent.voice_id);
+              return;
+            }
+            tokenStats.total_input  += respR.usage.input_tokens;
+            tokenStats.total_output += respR.usage.output_tokens;
+            tokenStats.calls.unshift({ ts: Date.now(), node_id: event.node_id, tier: agent.llm_tier, model: respR.model, input_tokens: respR.usage.input_tokens, output_tokens: respR.usage.output_tokens } satisfies TokenCallEntry);
+            if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+            if (!respR.tool_calls || respR.tool_calls.length === 0) {
+              memory.addTurn(event.session_id, agent.memory_ns, 'user', payload.text);
+              memory.addTurn(event.session_id, agent.memory_ns, 'assistant', respR.text);
+              const { text: safeT, count: cnt } = scanSecrets(respR.text);
+              if (cnt > 0) audit.secretRedacted(event.node_id, cnt);
+              await sendReply(event.node_id, safeT, agent.voice_id);
+              return;
+            }
+            messagesR = [...messagesR, { role: 'assistant' as const, content: respR.text || '', tool_calls: respR.tool_calls }];
+            for (const call of respR.tool_calls) {
+              if (!call.name) continue;
+              let resR: unknown;
+              try { resR = await executeToolCall(call, ctxR, event.session_id); }
+              catch (err) { resR = `Error: ${err instanceof Error ? err.message : String(err)}`; }
+              const rawR = JSON.stringify(resR);
+              messagesR = [...messagesR, { role: 'tool', content: rawR.length > MAX_TOOL_RESULT_CHARS ? rawR.slice(0, MAX_TOOL_RESULT_CHARS) + '...[truncated]' : rawR, tool_call_id: call.id }];
+            }
+          }
+          return;
+        }
+      } else if (isCancellation(payload.text)) {
+        consumePendingApproval(event.session_id);
+        await sendReply(event.node_id, 'Cancelled.', agent.voice_id);
+        return;
+      }
+      // Non-yes/no reply — consume and fall through to normal processing
+      consumePendingApproval(event.session_id);
+    }
+
+    // ── Dynamic tier scoring (claw-llm-router pattern) ────────────────────────
+    // Score message complexity in <1ms. Vision/audio tiers set by payload take
+    // precedence; scoring only applies to text messages.
+    const tier = payload.image_b64
       ? (payload.routing_hint === 'local_vision' ? 'local_vision' : 'vision')
-      : agent.llm_tier;
+      : (() => {
+          const scored = scoreMessage(payload.text);
+          // Only override if the scored tier differs from the agent's default
+          // AND the agent has a distinct model configured for that tier.
+          // This prevents pointless re-routing when both tiers use the same model.
+          const agentTier = agent.llm_tier;
+          console.log(`[Scorer] score=${scored.score} tier=${scored.tier} (agent default: ${agentTier})`);
+          return scored.tier;
+        })();
 
     const shortTerm    = memory.getShortTerm(event.session_id);
     const semanticHits = await memory.search(agent.memory_ns, payload.text).catch(() => []);
@@ -584,6 +690,45 @@ async function main(): Promise<void> {
         memory.appendEpisodic(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`);
         memory.indexMemory(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`).catch(() => {});
         return;  // ← exits processEventInner; while loop below never runs
+      }
+
+      // ── Approval gate: requiresApproval=true ─────────────────────────────────
+      // Pre-fetch ran. Generate a preview (one-shot, no tools) then pause.
+      // User must confirm before the action executes.
+      if (workflowDef.requiresApproval) {
+        audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
+        let previewResponse;
+        try {
+          previewResponse = await llm.complete(tier, {
+            system:     params.system,
+            messages:   augmentedMessages,
+            tools:      undefined,
+            max_tokens: 512,
+          });
+        } catch (err) {
+          console.error('[Workflow] Approval preview LLM error:', err);
+          await sendReply(event.node_id, 'Could not generate preview. Try again.', agent.voice_id);
+          return;
+        }
+        tokenStats.total_input  += previewResponse.usage.input_tokens;
+        tokenStats.total_output += previewResponse.usage.output_tokens;
+        tokenStats.calls.unshift({ ts: Date.now(), node_id: event.node_id, tier, model: previewResponse.model, input_tokens: previewResponse.usage.input_tokens, output_tokens: previewResponse.usage.output_tokens } satisfies TokenCallEntry);
+        if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+
+        // Store pending approval and send preview + confirmation prompt
+        storePendingApproval(
+          event.session_id,
+          buildPendingApproval({
+            workflowDef,
+            assembled,
+            originalText:      payload.text,
+            augmentedMessages,
+          }),
+        );
+        const previewText = previewResponse.text.trim() +
+          '\n\nReply **confirm** to proceed or **cancel** to abort.';
+        await sendReply(event.node_id, previewText, agent.voice_id);
+        return;
       }
 
       // ── Assist mode: inject pre-fetched data, fall into LLM tool loop ────────

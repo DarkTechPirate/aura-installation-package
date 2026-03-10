@@ -2,49 +2,75 @@
  * Workflow definitions for the hybrid orchestrator.
  * Each workflow maps an intent to a set of tool steps + an LLM instruction.
  *
- * Step chaining: sequential steps can reference prior step output via $ref.
- * e.g. args: { trade_id: '$positions.trades[0].id' }
- * The runner resolves $refs before calling each step. See runner.ts.
+ * Step features:
+ *   $ref chaining  — args: { id: '$stepId.path[0].field' } resolved at runtime
+ *   condition      — skip step if expression evaluates false
+ *   loop           — repeat step up to N times until condition is met
+ *   subWorkflow    — run a nested workflow as a step (instead of a tool call)
+ *
+ * Workflow features:
+ *   allowTools     — false: one-shot LLM narrate; true: LLM loop with tools
+ *   requiresApproval — pause after pre-fetch, ask user to confirm before acting
  */
 
-import type { WorkflowMatch } from './intent.js';
+import type { IntentName, WorkflowMatch } from './intent.js';
 
 export interface WorkflowStep {
-  id?:      string;                    // optional — required if later steps $ref this step
-  toolName: string;
-  args:     Record<string, unknown>;   // values starting with '$' are resolved as $refs
+  id?:          string;                    // required if later steps $ref this one
+  toolName?:    string;                    // undefined when subWorkflow is set
+  subWorkflow?: IntentName;               // run a nested workflow inline as a step
+  args:         Record<string, unknown>;   // values starting '$' are $ref resolved
+  /**
+   * JSONPath-style condition evaluated against the result map before this step runs.
+   * Step is skipped (not an error) if the expression evaluates to false.
+   * Supported operators: ===, !==, >, <, >=, <=
+   * Example: '$positions.trades.length > 0'
+   */
+  condition?:   string;
+  /**
+   * Loop this step up to maxIterations times until `condition` evaluates true.
+   * The step's result map entry is updated each iteration.
+   * Useful for polling (waiting for order fill, retrying a flaky API call).
+   */
+  loop?: {
+    maxIterations: number;
+    condition:     string;   // stop when this evaluates true
+  };
 }
 
 export interface WorkflowDef {
-  intent:         string;
-  parallel:       boolean;   // true → Promise.allSettled; false → sequential + chaining
-  steps:          WorkflowStep[];
-  llmInstruction: string;    // appended after assembled data to guide the LLM reply
+  intent:           string;
+  parallel:         boolean;   // true → Promise.allSettled; false → sequential + $ref
+  steps:            WorkflowStep[];
+  llmInstruction:   string;
   /**
-   * When false (default): orchestrator runs all steps, makes one-shot LLM call (no tools).
-   * When true: orchestrator only pre-fetches data, injects it into context, then falls
-   * into the normal LLM tool loop. Use for intents requiring LLM reasoning to select
-   * the right record (e.g. close a specific trade by instrument name).
+   * false (default): orchestrator runs all steps → one-shot LLM call (no tools).
+   * true: orchestrator pre-fetches only → injects data → normal LLM tool loop.
    */
-  allowTools:     boolean;
+  allowTools:       boolean;
+  /**
+   * When true: after pre-fetch, LLM generates a preview message + "confirm to proceed".
+   * The action only runs after the user confirms. Mirrors Lobster's `approval: required`.
+   * Only meaningful when allowTools=true (destructive action workflows).
+   */
+  requiresApproval?: boolean;
 }
 
 /**
- * Resolves a detected intent to a concrete WorkflowDef with args filled in.
- * Returns null if essential args are missing — caller falls through to LLM loop.
+ * Resolves a detected intent to a concrete WorkflowDef.
+ * Returns null if essential args are missing — falls through to LLM loop.
  */
 export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
   switch (match.intent) {
 
-    // ── Forex: parallel pre-fetch ────────────────────────────────────────────
+    // ── Forex: parallel narrate ──────────────────────────────────────────────
 
     case 'market_scan':
       return {
-        intent:      'market_scan',
-        parallel:    true,
-        allowTools:  false,
+        intent:     'market_scan',
+        parallel:   true,
+        allowTools: false,
         steps: [
-          // Broad ranking — tells us which pairs have momentum right now
           {
             toolName: 'forex_scan',
             args: {
@@ -52,14 +78,11 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
               granularity: 'D',
             },
           },
-          // Deep multi-timeframe analysis (D + H4 + H1 confluence) on the most traded pairs.
-          // All run in parallel — no sequential dependency needed for market scan.
           { toolName: 'forex_analysis', args: { instrument: 'XAU_USD', multi_tf: true } },
           { toolName: 'forex_analysis', args: { instrument: 'EUR_USD', multi_tf: true } },
           { toolName: 'forex_analysis', args: { instrument: 'GBP_USD', multi_tf: true } },
           { toolName: 'forex_analysis', args: { instrument: 'USD_JPY', multi_tf: true } },
           { toolName: 'forex_analysis', args: { instrument: 'XAG_USD', multi_tf: true } },
-          // Positions for correlation check only — not the focus of this analysis
           { toolName: 'forex_positions', args: {} },
         ],
         llmInstruction:
@@ -75,9 +98,9 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
 
     case 'account_review':
       return {
-        intent:      'account_review',
-        parallel:    true,
-        allowTools:  false,
+        intent:     'account_review',
+        parallel:   true,
+        allowTools: false,
         steps: [
           { toolName: 'forex_account',   args: {} },
           { toolName: 'forex_positions', args: {} },
@@ -88,14 +111,14 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
           'Flag anything that needs attention — trades near SL, large drawdown, or high margin usage.',
       };
 
-    // ── Forex: single-step ───────────────────────────────────────────────────
+    // ── Forex: single-step narrate ───────────────────────────────────────────
 
     case 'pre_trade_check': {
       if (!match.instrument || !match.side) return null;
       return {
-        intent:      'pre_trade_check',
-        parallel:    false,
-        allowTools:  false,
+        intent:     'pre_trade_check',
+        parallel:   false,
+        allowTools: false,
         steps: [
           {
             toolName: 'forex_pre_trade',
@@ -112,14 +135,11 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
     case 'quick_quote': {
       if (!match.instrument) return null;
       return {
-        intent:      'quick_quote',
-        parallel:    false,
-        allowTools:  false,
+        intent:     'quick_quote',
+        parallel:   false,
+        allowTools: false,
         steps: [
-          {
-            toolName: 'forex_quote',
-            args: { instrument: match.instrument },
-          },
+          { toolName: 'forex_quote', args: { instrument: match.instrument } },
         ],
         llmInstruction:
           'Present the current price cleanly — bid, ask, spread. ' +
@@ -127,102 +147,117 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
       };
     }
 
-    // ── Forex: chained sequential ────────────────────────────────────────────
+    // ── Forex: pre-fetch → LLM acts (with approval) ─────────────────────────
 
     case 'close_trade':
       return {
-        intent:      'close_trade',
-        parallel:    false,
-        allowTools:  true,   // LLM picks the right trade_id from positions and calls forex_close
+        intent:           'close_trade',
+        parallel:         false,
+        allowTools:       true,
+        requiresApproval: true,
         steps: [
-          { id: 'positions', toolName: 'forex_positions', args: {} },
+          {
+            id:        'positions',
+            toolName:  'forex_positions',
+            args:      {},
+            condition: undefined,     // always fetch — even if empty, LLM should report
+          },
         ],
         llmInstruction:
-          'The user wants to close a trade. Using the positions data above, identify the correct trade ' +
+          'The user wants to close a trade. Using the positions data, identify the correct trade ' +
           'by instrument name, then call forex_close with that trade_id. ' +
-          'If multiple trades match or the instrument is ambiguous, ask the user to confirm which one.',
+          'If multiple trades match or the instrument is ambiguous, ask which one.',
       };
 
     case 'cancel_order':
       return {
-        intent:      'cancel_order',
-        parallel:    false,
-        allowTools:  true,   // LLM picks the right order_id and calls forex_cancel
+        intent:           'cancel_order',
+        parallel:         false,
+        allowTools:       true,
+        requiresApproval: true,
         steps: [
-          { id: 'orders', toolName: 'forex_orders', args: {} },
+          {
+            id:       'orders',
+            toolName: 'forex_orders',
+            args:     {},
+          },
         ],
         llmInstruction:
-          'The user wants to cancel an order. Using the orders data above, identify the correct order ' +
+          'The user wants to cancel an order. Using the orders data, identify the correct order ' +
           'by instrument name or price, then call forex_cancel with that order_id. ' +
           'If multiple orders exist and the intent is ambiguous, list them and ask which to cancel.',
       };
 
-    case 'update_sltp': {
+    case 'update_sltp':
       return {
-        intent:      'update_sltp',
-        parallel:    false,
-        allowTools:  true,   // LLM reads positions, asks for values if missing, then calls forex_update_sltp
+        intent:           'update_sltp',
+        parallel:         false,
+        allowTools:       true,
+        requiresApproval: true,
         steps: [
-          { id: 'positions', toolName: 'forex_positions', args: {} },
+          {
+            id:       'positions',
+            toolName: 'forex_positions',
+            args:     {},
+          },
         ],
         llmInstruction:
-          'The user wants to update SL/TP on a trade. Using the positions data above, identify the correct ' +
-          'trade. If the user has specified new SL/TP values, call forex_update_sltp immediately. ' +
+          'The user wants to update SL/TP on a trade. Identify the correct trade from the positions data. ' +
+          'If the user specified new SL/TP values, call forex_update_sltp immediately. ' +
           'If values are missing, show current SL/TP and ask for the new ones before acting.',
       };
-    }
 
-    // ── General: parallel pre-fetch ──────────────────────────────────────────
+    // ── General: parallel narrate ────────────────────────────────────────────
 
     case 'daily_brief':
       return {
-        intent:      'daily_brief',
-        parallel:    true,
-        allowTools:  false,
+        intent:     'daily_brief',
+        parallel:   true,
+        allowTools: false,
         steps: [
           { toolName: 'calendar_list_events', args: { days_ahead: 1 } },
           { toolName: 'list_reminders',       args: {} },
           { toolName: 'forex_account',        args: {} },
         ],
         llmInstruction:
-          'Give a crisp morning brief covering: (1) today\'s calendar events, (2) any pending reminders, ' +
-          '(3) account snapshot. Keep it punchy — bullet points, no fluff. Flag anything urgent.',
+          'Give a crisp morning brief: (1) today\'s calendar events, (2) pending reminders, ' +
+          '(3) account snapshot. Bullet points, no fluff. Flag anything urgent.',
       };
 
     case 'github_review':
       return {
-        intent:      'github_review',
-        parallel:    true,
-        allowTools:  false,
+        intent:     'github_review',
+        parallel:   true,
+        allowTools: false,
         steps: [
           { toolName: 'list_prs',    args: { state: 'open' } },
           { toolName: 'list_issues', args: { state: 'open' } },
         ],
         llmInstruction:
           'Summarise open PRs and issues. Flag anything that needs action — review requested, ' +
-          'CI failing, or stale. Keep it brief and actionable.',
+          'CI failing, or stale. Brief and actionable.',
       };
 
-    // ── General: chained sequential ──────────────────────────────────────────
+    // ── General: chained search → browse ─────────────────────────────────────
 
     case 'web_research': {
       const query = match.query || '';
       if (!query) return null;
       return {
-        intent:      'web_research',
-        parallel:    false,
-        allowTools:  false,
+        intent:     'web_research',
+        parallel:   false,
+        allowTools: false,
         steps: [
           {
             id:       'search',
             toolName: 'search',
-            args: { query },
+            args:     { query },
           },
           {
-            id:       'browse',
-            toolName: 'browse_url',
-            // Follow the top search result for deeper content
-            args: { url: '$search.results[0].url' },
+            id:        'browse',
+            toolName:  'browse_url',
+            args:      { url: '$search.results[0].url' },
+            condition: '$search.results.length > 0',   // skip browse if no results
           },
         ],
         llmInstruction:
