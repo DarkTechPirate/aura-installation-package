@@ -271,7 +271,15 @@ export class RestAPI {
       });
     });
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
+      this.server.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          console.error(`[REST] Port ${rest_port} already in use — is another gateway instance running?`);
+          resolve(); // non-fatal: log and continue
+        } else {
+          reject(err);
+        }
+      });
       this.server.listen(rest_port, bind_address, () => {
         console.log(`[REST] API listening on http://${bind_address}:${rest_port}`);
         resolve();

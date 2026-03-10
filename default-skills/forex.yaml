@@ -46,9 +46,9 @@ tools:
 
   - name: forex_analysis
     description: >
-      Run full technical analysis (RSI, MACD, EMA20/50, Bollinger Bands, volume)
-      on any forex pair or metal. Returns trend, signal, score, and key reasons.
-      Always run this before placing a trade.
+      Run full technical analysis (RSI, MACD, EMA20/50, Bollinger Bands, ATR, volume)
+      on any forex pair or metal. Returns trend, signal, score, ATR, and key reasons.
+      Use multi_tf=true for a full Daily + H4 + H1 breakdown — best before placing a trade.
     parameters:
       type: object
       properties:
@@ -57,7 +57,10 @@ tools:
           description: "Instrument name (e.g. XAU_USD, EUR_USD, GBP_USD)"
         granularity:
           type: string
-          description: "Candle timeframe: S5, M1, M5, M15, M30, H1, H4, D (default: D)"
+          description: "Candle timeframe: S5, M1, M5, M15, M30, H1, H4, D (default: D). Ignored when multi_tf=true."
+        multi_tf:
+          type: boolean
+          description: "When true, runs analysis on Daily + H4 + H1 in parallel and returns all three timeframes with an overall signal."
       required: [instrument]
 
   - name: forex_trade

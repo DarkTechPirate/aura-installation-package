@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -21,7 +22,10 @@ import { CanvasServer } from './canvas/server.js';
 import { RestAPI, type HeartbeatLogEntry, type TokenStats, type TokenCallEntry } from './api/rest.js';
 import { SchedulerEngine } from './scheduler/engine.js';
 import { HeartbeatRunner } from './scheduler/heartbeat.js';
-import { ProactiveTools } from './scheduler/proactive.js';
+import { ProactiveTools }  from './scheduler/proactive.js';
+import { PulseRunner }     from './scheduler/pulse.js';
+import { AlertTemplate }  from './scheduler/alert_template.js';
+import { TradeMonitor }   from './scheduler/monitors/trade_monitor.js';
 import { RateLimiter } from './security/rate_limiter.js';
 import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
@@ -29,7 +33,7 @@ import { scanSecrets } from './security/secret_scanner.js';
 import type { ToolDefinition } from './llm/types.js';
 import { detectIntent }    from './workflow/intent.js';
 import { resolveWorkflow } from './workflow/workflows.js';
-import { runWorkflow }     from './workflow/runner.js';
+import { gary }            from './gary/manager.js';
 import { scoreMessage }    from './llm/scorer.js';
 import {
   buildPendingApproval,
@@ -635,8 +639,14 @@ async function main(): Promise<void> {
     let prefetchedMessages: LLMMessage[] | null = null;
 
     if (workflowDef) {
-      console.log(`[Workflow] Intent: ${intentMatch!.intent} — ${workflowDef.steps.length} step(s) (parallel: ${workflowDef.parallel}, allowTools: ${workflowDef.allowTools})`);
-      const assembled = await runWorkflow(workflowDef, ctx, executeToolCall, event.session_id);
+      console.log(`[Gary] Intent: ${intentMatch!.intent}`);
+      const garyResult = await gary.run(intentMatch!, ctx, executeToolCall, event.session_id);
+      if (!garyResult.ok) {
+        console.error(`[Gary] Error: ${garyResult.output}`);
+        await sendReply(event.node_id, `⚠️ Workflow error: ${garyResult.output}`, event.session_id);
+        return;
+      }
+      const assembled = garyResult.output;
 
       const lastUserContent = params.messages.at(-1)?.content ?? payload.text;
       const augmentedContent =
@@ -991,7 +1001,15 @@ async function main(): Promise<void> {
   const workflowFireFn = async (name: string): Promise<void> => {
     await skills.execute('workflow_run', { name, payload: {}, async: true }, wfSkillCtx);
   };
-  const scheduler = new SchedulerEngine(config, memory, channels, triggerHeartbeat, workflowFireFn);
+  // ── Alert template — reusable LLM delivery layer for all monitors ─────────
+  const alertAgent    = agentRegistry.get('personal') ?? agentRegistry.getAll()[0]!;
+  const alertTemplate = new AlertTemplate(llm, skills, alertAgent, channels, agentRegistry);
+
+  // ── Pulse — extensible monitoring framework ───────────────────────────────
+  const pulseRunner = new PulseRunner(skills, alertTemplate)
+    .register(new TradeMonitor());
+  // To add future monitors: .register(new PriceAlertMonitor())
+  const scheduler = new SchedulerEngine(config, memory, channels, triggerHeartbeat, workflowFireFn, pulseRunner);
   scheduler.start();
 
   // ── REST API ───────────────────────────────────────────────────────────────
@@ -1004,6 +1022,8 @@ async function main(): Promise<void> {
   });
   await restApi.start();
 
+  gary.start();
+
   console.log('\n✅ AURA Gateway started');
   console.log(`   ANP WebSocket : ws://${config.security.bind_address}:${config.security.anp_port}/anp`);
   console.log(`   REST API      : http://${config.security.bind_address}:${config.security.rest_port}`);
@@ -1011,11 +1031,13 @@ async function main(): Promise<void> {
     console.log(`   Canvas WS     : ws://${config.security.bind_address}:${config.canvas.port}/canvas`);
   console.log(`   Agents loaded : ${agents.length}`);
   console.log(`   Skills loaded : ${skills.listSkills().length}`);
+  console.log(`   Gary pool     : ${parseInt(process.env.GARY_POOL_SIZE ?? '2', 10)} worker(s)`);
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`\n[Gateway] Received ${signal}, shutting down...`);
     scheduler.stop();
+    gary.shutdown();
     await restApi.stop();
     await canvasServer.stop();
     await channels.destroy();

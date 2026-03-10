@@ -122,48 +122,111 @@ export async function forex_quote(args: { instrument: string }, _ctx: unknown): 
   } catch (e) { return { error: String(e) }; }
 }
 
-export async function forex_analysis(args: { instrument: string; granularity?: string }, _ctx: unknown): Promise<unknown> {
+// ── ATR(14) calculation ───────────────────────────────────────────────────────
+function calcAtr(bars: Bar[], period = 14): number {
+  if (bars.length < period + 1) return 0;
+  const trs: number[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const h = bars[i]!.h, l = bars[i]!.l, pc = bars[i - 1]!.c;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  return trs.slice(-period).reduce((s, v) => s + v, 0) / period;
+}
+
+// ── Single-timeframe analysis helper ─────────────────────────────────────────
+async function analyseTF(
+  oanda:      OandaClient,
+  instrument: string,
+  gran:       string,
+): Promise<Record<string, unknown> | { error: string }> {
+  const candles = await oanda.getCandles(instrument, gran, 100);
+  if (candles.length < 30) return { error: `Not enough candles for ${gran} (need 30+)` };
+
+  const bars: Bar[] = candles.map(c => ({
+    t: c.time,
+    o: parseFloat(c.mid.o),
+    h: parseFloat(c.mid.h),
+    l: parseFloat(c.mid.l),
+    c: parseFloat(c.mid.c),
+    v: c.volume,
+  }));
+
+  const result = analyze(bars, instrument);
+  const pip    = pipSize(instrument);
+  const atr    = calcAtr(bars);
+
+  return {
+    granularity:  gran,
+    trend:        result.trend,
+    signal:       result.signal,
+    score:        result.score,
+    price:        fmt(result.price),
+    change:       `${result.change1d.toFixed(2)}%`,
+    atr:          fmt(atr),
+    atr_pips:     (atr / pip).toFixed(1),
+    indicators: {
+      ema20:       fmt(result.ema20),
+      ema50:       fmt(result.ema50),
+      rsi14:       result.rsi14.toFixed(1),
+      macd_hist:   result.macd.histogram.toFixed(5),
+      bb_upper:    fmt(result.bb.upper),
+      bb_lower:    fmt(result.bb.lower),
+      bb_position: `${(result.bb.pct * 100).toFixed(0)}%`,
+      pip_size:    String(pip),
+      vol_ratio:   `${result.volumeRatio.toFixed(2)}x avg`,
+    },
+    reasons: result.reasons,
+  };
+}
+
+export async function forex_analysis(
+  args: { instrument: string; granularity?: string; multi_tf?: boolean },
+  _ctx: unknown,
+): Promise<unknown> {
   try {
-    const oanda  = client();
+    const oanda = client();
+    const inst  = OandaClient.normalise(args.instrument);
+    const price = await oanda.getPrice(inst).catch(() => null);
+
+    // ── Multi-timeframe mode: Daily + H4 + H1 in parallel ───────────────────
+    if (args.multi_tf) {
+      const [daily, h4, h1] = await Promise.all([
+        analyseTF(oanda, inst, 'D'),
+        analyseTF(oanda, inst, 'H4'),
+        analyseTF(oanda, inst, 'H1'),
+      ]);
+
+      // Overall signal: majority vote across timeframes
+      const signals = [daily, h4, h1]
+        .filter((r): r is Record<string, unknown> => !('error' in r))
+        .map(r => r.signal as string);
+      const buyCount  = signals.filter(s => s === 'BUY').length;
+      const sellCount = signals.filter(s => s === 'SELL').length;
+      const overall   = buyCount > sellCount ? 'BUY' : sellCount > buyCount ? 'SELL' : 'HOLD';
+
+      // Best score across timeframes
+      const scores = [daily, h4, h1]
+        .filter((r): r is Record<string, unknown> => !('error' in r))
+        .map(r => r.score as number);
+      const bestScore = scores.length ? Math.max(...scores) : 0;
+
+      return {
+        instrument:     inst,
+        price:          price ? fmt(price.mid) : null,
+        overall_signal: overall,
+        best_score:     `${bestScore}/100`,
+        timeframes: { daily, h4, h1 },
+      };
+    }
+
+    // ── Single-timeframe mode (default) ─────────────────────────────────────
     const gran   = args.granularity ?? 'D';
-    const candles = await oanda.getCandles(args.instrument, gran, 100);
-
-    if (candles.length < 30) return { error: 'Not enough candles for analysis (need 30+)' };
-
-    const bars: Bar[] = candles.map(c => ({
-      t: c.time,
-      o: parseFloat(c.mid.o),
-      h: parseFloat(c.mid.h),
-      l: parseFloat(c.mid.l),
-      c: parseFloat(c.mid.c),
-      v: c.volume,
-    }));
-
-    const inst   = OandaClient.normalise(args.instrument);
-    const result = analyze(bars, inst);
-    const pip    = pipSize(inst);
-    const price  = await oanda.getPrice(inst).catch(() => null);
+    const result = await analyseTF(oanda, inst, gran);
 
     return {
-      instrument:  inst,
-      granularity: gran,
-      price:       price ? fmt(price.mid) : fmt(result.price),
-      change:      `${result.change1d.toFixed(2)}%`,
-      trend:       result.trend,
-      signal:      result.signal,
-      score:       `${result.score}/100`,
-      indicators: {
-        ema20:       fmt(result.ema20),
-        ema50:       fmt(result.ema50),
-        rsi14:       result.rsi14.toFixed(1),
-        macd_hist:   result.macd.histogram.toFixed(5),
-        bb_upper:    fmt(result.bb.upper),
-        bb_lower:    fmt(result.bb.lower),
-        bb_position: `${(result.bb.pct * 100).toFixed(0)}%`,
-        pip_size:    String(pip),
-        vol_ratio:   `${result.volumeRatio.toFixed(2)}x avg`,
-      },
-      reasons: result.reasons,
+      instrument: inst,
+      price:      price ? fmt(price.mid) : null,
+      ...(result as Record<string, unknown>),
     };
   } catch (e) { return { error: String(e) }; }
 }
