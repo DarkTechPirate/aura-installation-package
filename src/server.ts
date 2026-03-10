@@ -704,7 +704,7 @@ async function main(): Promise<void> {
 
         // If model exhausted token budget during thinking, visible output is empty.
         // Retry with a compact prompt so the model has budget left to produce output.
-        if (!visibleText && wfResponse.usage.output_tokens >= (params.max_tokens - 10)) {
+        if (!visibleText && wfResponse.usage.output_tokens >= ((params.max_tokens ?? 4096) - 10)) {
           console.warn('[Workflow] Model exhausted token budget during thinking — retrying with compact prompt');
           try {
             const compactMessages: LLMMessage[] = [
