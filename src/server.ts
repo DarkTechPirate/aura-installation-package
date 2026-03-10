@@ -27,6 +27,9 @@ import { audit } from './security/audit.js';
 import { scanSecrets } from './security/secret_scanner.js';
 
 import type { ToolDefinition } from './llm/types.js';
+import { detectIntent }    from './workflow/intent.js';
+import { resolveWorkflow } from './workflow/workflows.js';
+import { runWorkflow }     from './workflow/runner.js';
 
 // ── Core skills always loaded regardless of message content ──────────────────
 const CORE_SKILLS = new Set([
@@ -504,6 +507,71 @@ async function main(): Promise<void> {
       installedSkills,
       unloadedSkillNames,
     });
+
+    // ── Hybrid workflow shortcut ──────────────────────────────────────────────
+    // Detect known structured intents and run hardcoded tool steps in parallel.
+    // One LLM call writes the reply — the tool loop below never runs for these.
+    // Unmatched intents fall through to the existing tool loop unchanged.
+    const intentMatch  = detectIntent(payload.text);
+    const workflowDef  = intentMatch ? resolveWorkflow(intentMatch) : null;
+
+    if (workflowDef) {
+      console.log(`[Workflow] Intent: ${intentMatch!.intent} — ${workflowDef.steps.length} step(s) (parallel: ${workflowDef.parallel})`);
+      const assembled = await runWorkflow(workflowDef, ctx, executeToolCall, event.session_id);
+
+      const lastUserContent = params.messages.at(-1)?.content ?? payload.text;
+      const augmentedContent =
+        lastUserContent + '\n\n' +
+        '[Workflow data — use this to write your reply, do not show raw JSON]\n' +
+        assembled + '\n\n' +
+        workflowDef.llmInstruction;
+
+      const workflowMessages: LLMMessage[] = [
+        ...params.messages.slice(0, -1),
+        { role: 'user' as const, content: augmentedContent },
+      ];
+
+      audit.llmCall(event.node_id, agent.memory_ns, tier, tier);
+      let wfResponse;
+      try {
+        wfResponse = await llm.complete(tier, {
+          system:     params.system,
+          messages:   workflowMessages,
+          tools:      undefined,   // one-shot reply — no tool loop
+          max_tokens: params.max_tokens,
+        });
+      } catch (err) {
+        console.error('[Workflow] LLM error:', err);
+        await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
+        return;
+      }
+
+      tokenStats.total_input  += wfResponse.usage.input_tokens;
+      tokenStats.total_output += wfResponse.usage.output_tokens;
+      tokenStats.calls.unshift({
+        ts: Date.now(), node_id: event.node_id, tier,
+        model:         wfResponse.model,
+        input_tokens:  wfResponse.usage.input_tokens,
+        output_tokens: wfResponse.usage.output_tokens,
+      } satisfies TokenCallEntry);
+      if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
+
+      memory.addTurn(event.session_id, agent.memory_ns, 'user',      payload.text);
+      memory.addTurn(event.session_id, agent.memory_ns, 'assistant', wfResponse.text);
+      const { text: safeWfText, count: wfCount } = scanSecrets(wfResponse.text);
+      if (wfCount > 0) audit.secretRedacted(event.node_id, wfCount);
+      await sendReply(event.node_id, safeWfText, agent.voice_id);
+
+      const today       = new Date().toISOString().slice(0, 10);
+      const timeStr     = new Date().toTimeString().slice(0, 5);
+      const uExcerpt    = payload.text.slice(0, 120).replace(/\n/g, ' ');
+      const rExcerpt    = wfResponse.text.slice(0, 250).replace(/\n/g, ' ');
+      const epLine      = `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`;
+      memory.appendEpisodic(agent.memory_ns, today, epLine);
+      memory.indexMemory(agent.memory_ns, today, epLine).catch(() => {});
+      return;  // ← exits processEventInner; while loop below never runs
+    }
+    // ── End hybrid workflow shortcut ─────────────────────────────────────────
 
     let messages: LLMMessage[] = params.messages;
     let iterations = 0;
