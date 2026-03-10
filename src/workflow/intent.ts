@@ -3,7 +3,7 @@
  * Matches user messages to known structured workflows before the LLM loop runs.
  *
  * Priority order (forex):
- *   pre_trade_check → quick_quote → close_trade → cancel_order → update_sltp → market_scan → account_review
+ *   pre_trade_check → close_trade → cancel_order → update_sltp → market_scan → account_review
  * General:
  *   daily_brief → github_review → web_research
  */
@@ -12,7 +12,6 @@ export type IntentName =
   | 'market_scan'
   | 'account_review'
   | 'pre_trade_check'
-  | 'quick_quote'
   | 'close_trade'
   | 'cancel_order'
   | 'update_sltp'
@@ -109,12 +108,7 @@ export function detectIntent(text: string): WorkflowMatch | null {
     return { intent: 'update_sltp', instrument };
   }
 
-  // 5. quick_quote — specific instrument, no side, no broad scan trigger
-  if (instrument && !side && !MARKET_SCAN_RE.test(text)) {
-    return { intent: 'quick_quote', instrument };
-  }
-
-  // 6. market_scan
+  // 5. market_scan
   if (MARKET_SCAN_RE.test(text)) {
     return { intent: 'market_scan' };
   }

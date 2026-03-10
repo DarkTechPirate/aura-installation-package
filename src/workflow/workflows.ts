@@ -134,21 +134,6 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
       };
     }
 
-    case 'quick_quote': {
-      if (!match.instrument) return null;
-      return {
-        intent:     'quick_quote',
-        parallel:   false,
-        allowTools: false,
-        steps: [
-          { toolName: 'forex_quote', args: { instrument: match.instrument } },
-        ],
-        llmInstruction:
-          'Present the current price cleanly — bid, ask, spread. ' +
-          'Add one-liner context if the spread or price level is notable.',
-      };
-    }
-
     // ── Forex: pre-fetch → LLM acts (with approval) ─────────────────────────
 
     case 'close_trade':

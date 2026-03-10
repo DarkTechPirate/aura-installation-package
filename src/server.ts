@@ -698,16 +698,54 @@ async function main(): Promise<void> {
         } satisfies TokenCallEntry);
         if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
 
+        // Strip <think>...</think> blocks (chain-of-thought models like kimi-k2.5)
+        const stripThink = (t: string) => t.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        let visibleText = stripThink(wfResponse.text);
+
+        // If model exhausted token budget during thinking, visible output is empty.
+        // Retry with a compact prompt so the model has budget left to produce output.
+        if (!visibleText && wfResponse.usage.output_tokens >= (params.max_tokens - 10)) {
+          console.warn('[Workflow] Model exhausted token budget during thinking — retrying with compact prompt');
+          try {
+            const compactMessages: LLMMessage[] = [
+              ...params.messages.slice(0, -1),
+              {
+                role: 'user' as const,
+                content:
+                  lastUserContent + '\n\n' +
+                  '[Pre-fetched data]\n' + assembled + '\n\n' +
+                  'Answer in 5 bullet points, max 150 words total. Be direct.',
+              },
+            ];
+            const retryResp = await llm.complete(tier, {
+              system:     params.system,
+              messages:   compactMessages,
+              tools:      undefined,
+              max_tokens: params.max_tokens,
+            });
+            visibleText = stripThink(retryResp.text);
+            tokenStats.total_input  += retryResp.usage.input_tokens;
+            tokenStats.total_output += retryResp.usage.output_tokens;
+            console.log(`[Workflow] Compact retry: ${retryResp.usage.output_tokens} tokens, text=${visibleText.length} chars`);
+          } catch (retryErr) {
+            console.error('[Workflow] Compact retry failed:', retryErr);
+          }
+        }
+
+        if (!visibleText) {
+          visibleText = 'I gathered the data but ran out of tokens to summarise it. Please try asking for a shorter answer.';
+        }
+
         memory.addTurn(event.session_id, agent.memory_ns, 'user',      payload.text);
-        memory.addTurn(event.session_id, agent.memory_ns, 'assistant', wfResponse.text);
-        const { text: safeWfText, count: wfCount } = scanSecrets(wfResponse.text);
+        memory.addTurn(event.session_id, agent.memory_ns, 'assistant', visibleText);
+        const { text: safeWfText, count: wfCount } = scanSecrets(visibleText);
         if (wfCount > 0) audit.secretRedacted(event.node_id, wfCount);
         await sendReply(event.node_id, safeWfText, agent.voice_id);
 
         const today    = new Date().toISOString().slice(0, 10);
         const timeStr  = new Date().toTimeString().slice(0, 5);
         const uExcerpt = payload.text.slice(0, 120).replace(/\n/g, ' ');
-        const rExcerpt = wfResponse.text.slice(0, 250).replace(/\n/g, ' ');
+        const rExcerpt = visibleText.slice(0, 250).replace(/\n/g, ' ');
         memory.appendEpisodic(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`);
         memory.indexMemory(agent.memory_ns, today, `[${today} ${timeStr}] User: ${uExcerpt} → Gary: ${rExcerpt}`).catch(() => {});
         return;  // ← exits processEventInner; while loop below never runs
@@ -794,10 +832,14 @@ async function main(): Promise<void> {
       if (tokenStats.calls.length > 200) tokenStats.calls.length = 200;
 
       if (!response.tool_calls || response.tool_calls.length === 0) {
-        // Final text response
+        // Final text response — strip <think> blocks (chain-of-thought models like kimi-k2.5)
+        const stripThink = (t: string) => t.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        const visibleLoopText = stripThink(response.text) ||
+          'I processed your request but ran out of token budget before writing a response. Please try again.';
+
         memory.addTurn(event.session_id, agent.memory_ns, 'user', payload.text);
-        memory.addTurn(event.session_id, agent.memory_ns, 'assistant', response.text);
-        const { text: safeText, count } = scanSecrets(response.text);
+        memory.addTurn(event.session_id, agent.memory_ns, 'assistant', visibleLoopText);
+        const { text: safeText, count } = scanSecrets(visibleLoopText);
         if (count > 0) audit.secretRedacted(event.node_id, count);
         await sendReply(event.node_id, safeText, agent.voice_id);
         // Log tool errors to self-knowledge (no LLM call needed — errors are already factual)
@@ -807,7 +849,7 @@ async function main(): Promise<void> {
         const today        = new Date().toISOString().slice(0, 10);
         const timeStr      = new Date().toTimeString().slice(0, 5);
         const userExcerpt  = payload.text.slice(0, 120).replace(/\n/g, ' ');
-        const replyExcerpt = response.text.slice(0, 250).replace(/\n/g, ' ');
+        const replyExcerpt = visibleLoopText.slice(0, 250).replace(/\n/g, ' ');
         const episodicLine = `[${today} ${timeStr}] User: ${userExcerpt} → Gary: ${replyExcerpt}`;
         memory.appendEpisodic(agent.memory_ns, today, episodicLine);
         memory.indexMemory(agent.memory_ns, today, episodicLine).catch(() => {});
