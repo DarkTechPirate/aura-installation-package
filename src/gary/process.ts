@@ -7,6 +7,15 @@
  *   3. Gary resolves the pending promise and continues the workflow
  */
 
+// ── IPC safety: redirect all console.log/warn to stderr ──────────────────────
+// Gary uses stdout exclusively for JSON-line IPC messages (send() below).
+// The logger.ts module uses console.log for info/debug and console.warn for warn,
+// which would corrupt the IPC channel if left on stdout.
+// Redirect before any module imports that might log during initialisation.
+const _toStderr = (...args: unknown[]) => process.stderr.write(args.map(String).join(' ') + '\n');
+console.log  = _toStderr;
+console.warn = _toStderr;
+
 import readline from 'readline';
 import type { ToolCall }     from '../llm/types.js';
 import type { SkillContext } from '../skills/types.js';

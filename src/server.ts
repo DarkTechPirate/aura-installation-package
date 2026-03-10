@@ -589,6 +589,12 @@ async function main(): Promise<void> {
       skills,
       memory,
     );
+    const pulseStatusToolDef = {
+      name: 'pulse_status',
+      description: 'Get the current status of the Pulse trade monitor — last check time, recent alerts, and per-monitor stats. Use this when the user asks about trade monitoring, pulse, or recent alerts.',
+      parameters: { type: 'object', properties: {} },
+    };
+
     const rawTools         = [
       ...skillToolDefs,
       selfWriteTool.toolDef,
@@ -596,6 +602,7 @@ async function main(): Promise<void> {
       ...canvasToolDefs,
       ...memoryToolDefs,
       ...proactiveTools.getToolDefs(),
+      pulseStatusToolDef,
     ];
     // Deduplicate by name — first definition wins (Claude rejects duplicate tool names)
     const seen = new Set<string>();
@@ -877,6 +884,11 @@ async function main(): Promise<void> {
     console.log(`[Loop] tool_call: ${call.name}`);
     const args = call.args as Record<string, unknown>;
 
+    // Pulse status tool
+    if (call.name === 'pulse_status') {
+      return pulseRunner.getStatus();
+    }
+
     // Self-write tool
     if (call.name === 'create_skill') {
       const result = await selfWriteTool.execute(args as unknown as SelfWriteArgs, ctx);
@@ -1019,6 +1031,7 @@ async function main(): Promise<void> {
     canvasRenderer, triggerHeartbeat,
     heartbeatLog, startTime: START_TIME,
     orchestrator, tokenStats,
+    getPulseStatus: () => pulseRunner.getStatus(),
   });
   await restApi.start();
 
