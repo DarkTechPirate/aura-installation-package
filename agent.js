@@ -26,7 +26,8 @@ const LOG_DIR     = path.join(AURA_DIR, 'logs');
 const LOG_FILE    = path.join(LOG_DIR, 'aura.log');
 const PID_FILE    = path.join(AURA_DIR, 'aura.pid');
 const ENV_FILE    = path.join(__dirname, '.env');
-const TSX_BIN     = path.join(__dirname, 'node_modules', '.bin', 'tsx');
+const IS_WINDOWS  = process.platform === 'win32';
+const TSX_BIN     = path.join(__dirname, 'node_modules', '.bin', IS_WINDOWS ? 'tsx.cmd' : 'tsx');
 const SERVER_TS   = path.join(__dirname, 'src', 'server.ts');
 const DEFAULT_SKILLS = path.join(__dirname, 'default-skills');
 const SYSTEMD_DIR = path.join(os.homedir(), '.config', 'systemd', 'user');
@@ -710,7 +711,7 @@ async function cmdOnboard() {
       await killGatewayPortsAndWait();
       console.log('');
       const env = { ...process.env, ...loadEnvFile() };
-      spawn(TSX_BIN, [SERVER_TS], { cwd: __dirname, stdio: 'inherit', env }).on('exit', (code) => {
+      spawn(TSX_BIN, [SERVER_TS], { cwd: __dirname, stdio: 'inherit', shell: IS_WINDOWS, env }).on('exit', (code) => {
         process.exit(code ?? 0);
       });
     }
@@ -767,6 +768,7 @@ function spawnDetached() {
     cwd: __dirname,
     detached: true,
     stdio: ['ignore', logFd, logFd],
+    shell: IS_WINDOWS,
     env,
   });
 
