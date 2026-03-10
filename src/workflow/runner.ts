@@ -1,11 +1,15 @@
 /**
  * Workflow runner — executes steps defined in WorkflowDef, assembles results
  * into a context string for a single LLM call.
+ *
+ * Chaining: sequential steps can reference prior step results via $ref notation.
+ * e.g. args: { trade_id: '$positions.trades[0].id' }
+ * The runner resolves these before calling execute on each step.
  */
 
 import type { SkillContext } from '../skills/types.js';
 import type { ToolCall } from '../llm/types.js';
-import type { WorkflowDef } from './workflows.js';
+import type { WorkflowDef, WorkflowStep } from './workflows.js';
 import { createLogger } from '../logger.js';
 
 const logger = createLogger('Workflow');
@@ -35,6 +39,42 @@ function formatResult(stepResult: StepResult): string {
   return `[Tool: ${stepResult.toolName}]\n${capped}`;
 }
 
+/**
+ * Resolves $ref placeholders in step args using results from prior steps.
+ * Syntax: '$stepId.field.path[0].subfield'
+ * Returns the arg value unchanged if it is not a $ref string.
+ */
+function resolveArgs(
+  args:      Record<string, unknown>,
+  resultMap: Map<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).map(([k, v]) => {
+      if (typeof v !== 'string' || !v.startsWith('$')) return [k, v];
+
+      // Parse '$stepId.path[0].field' → stepId + path segments
+      const [stepId, ...pathParts] = v.slice(1).split('.');
+      let val: unknown = resultMap.get(stepId!);
+
+      for (const part of pathParts) {
+        if (val == null) break;
+        // Handle array indexing: 'trades[0]'
+        const arrMatch = part.match(/^(\w+)\[(\d+)\]$/);
+        if (arrMatch) {
+          val = (val as Record<string, unknown[]>)[arrMatch[1]!]?.[Number(arrMatch[2])];
+        } else {
+          val = (val as Record<string, unknown>)[part];
+        }
+      }
+
+      if (val == null) {
+        logger.warn(`$ref '${v}' resolved to null/undefined — step may fail`);
+      }
+      return [k, val];
+    })
+  );
+}
+
 async function runParallel(
   def:       WorkflowDef,
   ctx:       SkillContext,
@@ -57,13 +97,19 @@ async function runSequential(
   sessionId: string,
   execute:   ExecuteFn,
 ): Promise<StepResult[]> {
-  const results: StepResult[] = [];
+  const results:   StepResult[]        = [];
+  const resultMap: Map<string, unknown> = new Map();
+
   for (const step of def.steps) {
+    const resolvedArgs = resolveArgs(step.args, resultMap);
     try {
-      const result = await execute(makeCall(step.toolName, step.args), ctx, sessionId);
+      const result = await execute(makeCall(step.toolName, resolvedArgs), ctx, sessionId);
+      if (step.id) resultMap.set(step.id, result);
       results.push({ toolName: step.toolName, result });
     } catch (err) {
       results.push({ toolName: step.toolName, error: err instanceof Error ? err.message : String(err) });
+      // Non-fatal: log and continue — subsequent steps that $ref this will get null
+      if (step.id) resultMap.set(step.id, null);
     }
   }
   return results;
@@ -93,6 +139,5 @@ export async function runWorkflow(
     ms:      Date.now() - t0,
   });
 
-  const assembled = results.map(formatResult).join('\n\n');
-  return assembled;
+  return results.map(formatResult).join('\n\n');
 }
