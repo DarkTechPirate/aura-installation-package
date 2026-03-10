@@ -96,7 +96,20 @@ export class OllamaAdapter implements LLMAdapter {
       }
     }
 
-    const data = await response.json() as OllamaResponse;
+    let data: OllamaResponse;
+    try {
+      data = await response.json() as OllamaResponse;
+    } catch {
+      // Ollama returned truncated JSON — happens when model hits token cap mid-generation
+      console.warn('[Ollama] Truncated JSON response — model likely hit token cap');
+      return {
+        text: '',
+        tool_calls: undefined,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        model: this.model,
+        provider: this.provider,
+      };
+    }
     const msg = data.message;
 
     let text = msg.content ?? '';
