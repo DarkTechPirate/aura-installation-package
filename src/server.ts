@@ -97,8 +97,60 @@ function purgeExpiredSessionSkills(): void {
   const now = Date.now();
   for (const [k, v] of sessionSkillCache) {
     const ttl = isStableSession(k) ? SESSION_SKILL_TTL_STABLE_MS : SESSION_SKILL_TTL_MS;
-    if (now - v.lastUsed > ttl) sessionSkillCache.delete(k);
+    if (now - v.lastUsed > ttl) { sessionSkillCache.delete(k); sessionMetaCache.delete(k); }
   }
+}
+
+// ── Meta-tool smart loader ─────────────────────────────────────────────────────
+// Static tools (canvas, orchestrator, memory extras, etc.) are only injected when
+// the message contains relevant keywords — reducing token cost on simple requests.
+// Groups accumulate per session (same pattern as skills).
+
+const sessionMetaCache = new Map<string, Set<string>>();
+
+const META_PATTERNS: Array<{ re: RegExp; group: string }> = [
+  { re: /\b(canvas|draw|whiteboard|diagram|show on (screen|canvas)|display (on )?canvas)\b/i,                          group: 'canvas'      },
+  { re: /\b(spawn (a |an |the )?team|agent team|sub.?agent|multi.?agent|resume agent|define block|parallel agents?)\b/i, group: 'orchestrator'},
+  { re: /\b(create skill|write (a |new )?skill|new skill|make (a )?(skill|tool)|build (a )?skill)\b/i,                  group: 'self_write'  },
+  { re: /\b(consolidate memory|clean.?up memory|deduplicate memory|reorgani[sz]e memory)\b/i,                            group: 'consolidate' },
+  { re: /\b(broadcast|all (my )?channels|all devices|send to all|notify everyone)\b/i,                                  group: 'send_all'    },
+  { re: /\b(pulse|trade monitor|alert monitor|pulse status|monitor status)\b/i,                                          group: 'pulse'       },
+];
+
+function smartLoadMetaTools(
+  message:         string,
+  sessionId:       string,
+  selfWriteDef:    ToolDefinition,
+  orchestratorDefs:ToolDefinition[],
+  canvasDefs:      ToolDefinition[],
+  memoryDefs:      ToolDefinition[],
+  proactiveDefs:   ToolDefinition[],
+  pulseDef:        ToolDefinition,
+): ToolDefinition[] {
+  // Accumulate triggered groups for this session
+  if (!sessionMetaCache.has(sessionId)) sessionMetaCache.set(sessionId, new Set());
+  const groups = sessionMetaCache.get(sessionId)!;
+  for (const { re, group } of META_PATTERNS) {
+    if (re.test(message)) groups.add(group);
+  }
+
+  // Always-on core: the 3 most-used memory tools + send_message
+  const ALWAYS_MEMORY    = new Set(['remember_about_user', 'remember_about_self', 'search_memory']);
+  const result: ToolDefinition[] = [
+    ...memoryDefs.filter(t => ALWAYS_MEMORY.has(t.name)),
+    ...proactiveDefs.filter(t => t.name === 'send_message'),
+  ];
+
+  // Session-accumulated groups
+  if (groups.has('canvas'))       result.push(...canvasDefs);
+  if (groups.has('orchestrator')) result.push(...orchestratorDefs);
+  if (groups.has('self_write'))   result.push(selfWriteDef);
+  if (groups.has('consolidate'))  { const t = memoryDefs.find(t => t.name === 'consolidate_memory');   if (t) result.push(t); }
+  if (groups.has('send_all'))     { const t = proactiveDefs.find(t => t.name === 'send_to_agent_channels'); if (t) result.push(t); }
+  if (groups.has('pulse'))        result.push(pulseDef);
+
+  console.log(`[MetaTools] groups=[${[...groups].join(',')||'core'}] total=${result.length}`);
+  return result;
 }
 
 /**
@@ -608,21 +660,24 @@ async function main(): Promise<void> {
       skills,
       memory,
     );
-    const pulseStatusToolDef = {
+    const pulseStatusToolDef: ToolDefinition = {
       name: 'pulse_status',
       description: 'Get the current status of the Pulse trade monitor — last check time, recent alerts, and per-monitor stats. Use this when the user asks about trade monitoring, pulse, or recent alerts.',
       parameters: { type: 'object', properties: {} },
     };
 
-    const rawTools         = [
-      ...skillToolDefs,
+    const metaToolDefs = smartLoadMetaTools(
+      payload.text ?? '',
+      event.session_id,
       selfWriteTool.toolDef,
-      ...orchestrator.getToolDefs(),
-      ...canvasToolDefs,
-      ...memoryToolDefs,
-      ...proactiveTools.getToolDefs(),
+      orchestrator.getToolDefs(),
+      canvasToolDefs,
+      memoryToolDefs,
+      proactiveTools.getToolDefs(),
       pulseStatusToolDef,
-    ];
+    );
+
+    const rawTools = [...skillToolDefs, ...metaToolDefs];
     // Deduplicate by name — first definition wins (Claude rejects duplicate tool names)
     const seen = new Set<string>();
     const allTools = rawTools.filter(t => {
