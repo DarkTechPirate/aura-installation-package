@@ -706,7 +706,7 @@ async function main(): Promise<void> {
           await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
           return;
         }
-        console.log(`[Workflow] LLM narrate: ${Date.now() - llmT0}ms, ${wfResponse.usage.output_tokens} tokens`);
+        console.log(`[Workflow] LLM narrate: ${Date.now() - llmT0}ms | in=${wfResponse.usage.input_tokens} out=${wfResponse.usage.output_tokens} tokens`);
 
         tokenStats.total_input  += wfResponse.usage.input_tokens;
         tokenStats.total_output += wfResponse.usage.output_tokens;
@@ -724,7 +724,7 @@ async function main(): Promise<void> {
 
         // If model exhausted token budget during thinking, visible output is empty.
         // Retry with a compact prompt so the model has budget left to produce output.
-        if (!visibleText && wfResponse.usage.output_tokens >= ((params.max_tokens ?? 4096) - 10)) {
+        if (!visibleText && wfResponse.usage.output_tokens >= ((params.max_tokens ?? 16384) - 10)) {
           console.warn('[Workflow] Model exhausted token budget during thinking — retrying with compact prompt');
           try {
             const compactMessages: LLMMessage[] = [
@@ -839,6 +839,7 @@ async function main(): Promise<void> {
       }
 
       // Accumulate token usage
+      console.log(`[LLM] iter=${iterations} in=${response.usage.input_tokens} out=${response.usage.output_tokens} tools=${params.tools?.length ?? 0}`);
       tokenStats.total_input  += response.usage.input_tokens;
       tokenStats.total_output += response.usage.output_tokens;
       tokenStats.calls.unshift({

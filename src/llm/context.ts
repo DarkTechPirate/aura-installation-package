@@ -245,7 +245,7 @@ export class ContextBuilder {
       system,
       messages,
       tools: toolDefs.length > 0 ? toolDefs : undefined,
-      max_tokens: 4096,
+      max_tokens: 16384,
     };
   }
 }
