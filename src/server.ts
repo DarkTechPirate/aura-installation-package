@@ -33,6 +33,7 @@ import { scanSecrets } from './security/secret_scanner.js';
 import type { ToolDefinition } from './llm/types.js';
 import { detectIntent }    from './workflow/intent.js';
 import { resolveWorkflow } from './workflow/workflows.js';
+import { workflowLoader }  from './workflow/loader.js';
 import { gary }            from './gary/manager.js';
 import { scoreMessage }    from './llm/scorer.js';
 import {
@@ -299,6 +300,9 @@ async function main(): Promise<void> {
   await skills.load();
   skills.watchSkillsDir();
 
+  await workflowLoader.load();
+  workflowLoader.watch();
+
   // Index skill descriptions for vector-based smart loading.
   // Re-index whenever a skill is added or updated.
   const reindexSkills = (): void => {
@@ -479,6 +483,15 @@ async function main(): Promise<void> {
 
     const agent = agentRegistry.resolve(event.node_id);
 
+    // ── Agent pause gate — sub-agent waiting for user input ──────────────────
+    if (orchestrator.hasPendingPause(event.session_id)) {
+      const resolved = orchestrator.resolvePause(event.session_id, payload.text);
+      if (resolved) {
+        await sendReply(event.node_id, 'Reply forwarded — agent is resuming...', agent?.voice_id ?? null);
+        return;
+      }
+    }
+
     // ── Approval gate — check before anything else ────────────────────────────
     // If the user has a pending approval (from a requiresApproval workflow),
     // intercept this message and either resume or cancel the pending action.
@@ -505,7 +518,7 @@ async function main(): Promise<void> {
             agent.skills ?? [], pending.originalText, event.session_id, skills, memory,
           );
           const rawToolsR = [
-            ...skillToolDefs, selfWriteTool.toolDef, orchestrator.getToolDef(),
+            ...skillToolDefs, selfWriteTool.toolDef, ...orchestrator.getToolDefs(),
             ...canvasToolDefs, ...memoryToolDefs, ...proactiveTools.getToolDefs(),
           ];
           const seenR = new Set<string>();
@@ -604,7 +617,7 @@ async function main(): Promise<void> {
     const rawTools         = [
       ...skillToolDefs,
       selfWriteTool.toolDef,
-      orchestrator.getToolDef(),
+      ...orchestrator.getToolDefs(),
       ...canvasToolDefs,
       ...memoryToolDefs,
       ...proactiveTools.getToolDefs(),
@@ -644,7 +657,8 @@ async function main(): Promise<void> {
     //   Used for: close_trade, cancel_order, update_sltp (require LLM to pick right ID).
     //
     // Unmatched intents fall through to the existing tool loop unchanged.
-    const intentMatch = payload.workflow_disabled ? null : detectIntent(payload.text);
+    const intentMatch = payload.workflow_disabled ? null :
+      (detectIntent(payload.text) ?? workflowLoader.detectIntent(payload.text));
     const workflowDef = intentMatch ? resolveWorkflow(intentMatch) : null;
 
     // prefetchedMessages: set when allowTools=true so the LLM loop starts with
@@ -948,9 +962,17 @@ async function main(): Promise<void> {
       return result;
     }
 
-    // Spawn team tool
+    // Orchestrator tools
     if (call.name === 'spawn_team') {
       return orchestrator.spawnTeam(args, ctx.node_id, ctx);
+    }
+    if (call.name === 'resume_agent') {
+      return orchestrator.resumeAgent(args, ctx.node_id, ctx);
+    }
+    if (call.name === 'define_block') {
+      const { name, role, task, tools } = args as { name: string; role: string; task: string; tools?: string[] };
+      orchestrator.blocks.define(name, { role, task, tools });
+      return { defined: true, name };
     }
 
     // Memory tools

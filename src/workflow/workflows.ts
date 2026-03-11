@@ -14,6 +14,7 @@
  */
 
 import type { IntentName, WorkflowMatch } from './intent.js';
+import { workflowLoader } from './loader.js';
 
 export interface WorkflowStep {
   id?:          string;                    // required if later steps $ref this one
@@ -74,6 +75,10 @@ export interface WorkflowDef {
  * Returns null if essential args are missing — falls through to LLM loop.
  */
 export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
+  // File-loaded workflows (from ~/.aura/workflows/*.yaml) override built-ins
+  const fileLoaded = workflowLoader.resolve(match);
+  if (fileLoaded) return fileLoaded;
+
   switch (match.intent) {
 
     // ── Forex: parallel narrate ──────────────────────────────────────────────
