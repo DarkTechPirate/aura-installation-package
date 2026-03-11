@@ -39,6 +39,7 @@ import {
   buildPendingApproval,
   consumePendingApproval,
   hasPendingApproval,
+  peekPendingApproval,
   isConfirmation,
   isCancellation,
   pruneExpiredApprovals,
@@ -557,9 +558,14 @@ async function main(): Promise<void> {
         consumePendingApproval(event.session_id);
         await sendReply(event.node_id, 'Cancelled.', agent.voice_id);
         return;
+      } else {
+        // Non-confirm/cancel message — keep the pending approval alive (Lobster-style).
+        // Fall through to normal processing; remind user at end of response.
+        const pending = peekPendingApproval(event.session_id);
+        if (pending) {
+          console.log(`[Workflow] Non-confirm message while approval pending for: ${pending.workflowDef.intent}`);
+        }
       }
-      // Non-yes/no reply — consume and fall through to normal processing
-      consumePendingApproval(event.session_id);
     }
 
     // ── Dynamic tier scoring (claw-llm-router pattern) ────────────────────────

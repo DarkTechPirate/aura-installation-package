@@ -36,6 +36,13 @@ export interface WorkflowStep {
     maxIterations: number;
     condition:     string;   // stop when this evaluates true
   };
+  /**
+   * Lobster-style approval checkpoint.
+   * When 'required': workflow pauses after this step completes, sends results
+   * to user for review, and waits for confirmation before continuing.
+   * Only meaningful in sequential (parallel:false) workflows.
+   */
+  approval?: 'required';
 }
 
 export interface WorkflowDef {
@@ -54,6 +61,12 @@ export interface WorkflowDef {
    * Only meaningful when allowTools=true (destructive action workflows).
    */
   requiresApproval?: boolean;
+  /**
+   * Lobster-style fail-fast mode.
+   * When true: abort the entire workflow on the first step error.
+   * When false (default): collect errors and continue — all results injected into LLM context.
+   */
+  failFast?: boolean;
 }
 
 /**

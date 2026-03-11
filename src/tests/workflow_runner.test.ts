@@ -111,7 +111,7 @@ describe('runWorkflow — condition gate', () => {
       llmInstruction: '',
     };
 
-    const result = await runWorkflow(def, mockCtx, execute, 'sess1');
+    const { assembled: result } = await runWorkflow(def, mockCtx, execute, 'sess1');
     // browse_url should never be called — condition false (empty results)
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ name: 'search' }), mockCtx, 'sess1');
@@ -218,7 +218,7 @@ describe('runWorkflow — parallel', () => {
       llmInstruction: '',
     };
 
-    const result = await runWorkflow(def, mockCtx, execute, 'sess1');
+    const { assembled: result } = await runWorkflow(def, mockCtx, execute, 'sess1');
     expect(execute).toHaveBeenCalledTimes(3);
     expect(result).toContain('tool_a');
     expect(result).toContain('tool_b');
@@ -243,7 +243,7 @@ describe('runWorkflow — parallel', () => {
       llmInstruction: '',
     };
 
-    const result = await runWorkflow(def, mockCtx, execute, 'sess1');
+    const { assembled: result } = await runWorkflow(def, mockCtx, execute, 'sess1');
     expect(result).toContain('tool_b');
     expect(result).toContain('Error: tool_b failed');
     expect(result).toContain('tool_c');

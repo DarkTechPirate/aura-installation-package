@@ -90,12 +90,15 @@ rl.on('line', async (line) => {
     stubCtx.session_id = msg.sessionId;
 
     try {
-      const output = await runWorkflow(def, stubCtx, execute, msg.sessionId);
+      const wfResult = await runWorkflow(def, stubCtx, execute, msg.sessionId);
+      const status = wfResult.status === 'aborted'
+        ? 'error'
+        : def.requiresApproval ? 'needs_approval' : 'ok';
       send({
         type:   'result',
-        ok:     true,
-        status: def.requiresApproval ? 'needs_approval' : 'ok',
-        output,
+        ok:     wfResult.status !== 'aborted',
+        status,
+        output: wfResult.assembled,
       });
     } catch (err) {
       send({

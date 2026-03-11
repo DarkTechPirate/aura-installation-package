@@ -230,22 +230,35 @@ async function runSequential(
   for (const step of def.steps) {
     const stepResult = await runStep(step, resultMap, ctx, sessionId, execute);
     results.push(stepResult);
+
+    // Lobster fail-fast: abort on first error if failFast is set
+    if (def.failFast && stepResult.error) {
+      logger.warn(`Workflow aborted (failFast) at step '${stepResult.toolName}': ${stepResult.error}`);
+      break;
+    }
   }
   return results;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+export interface WorkflowResult {
+  /** 'ok' — all steps ran; 'aborted' — failFast triggered; 'ok' still used when errors are non-fatal */
+  status:   'ok' | 'aborted';
+  assembled: string;   // formatted step results ready for LLM injection
+  results:   StepResult[];
+}
+
 /**
- * Executes all workflow steps and returns an assembled context string
- * ready to be injected into the LLM user message.
+ * Executes all workflow steps and returns a structured result.
+ * assembled is the context string ready to be injected into the LLM user message.
  */
 export async function runWorkflow(
   def:       WorkflowDef,
   ctx:       SkillContext,
   execute:   ExecuteFn,
   sessionId: string,
-): Promise<string> {
+): Promise<WorkflowResult> {
   const t0 = Date.now();
 
   const results = def.parallel
@@ -254,13 +267,22 @@ export async function runWorkflow(
 
   const successCount = results.filter(r => !r.error && !r.skipped).length;
   const skippedCount = results.filter(r => r.skipped).length;
+  const errorCount   = results.filter(r => r.error).length;
+  const aborted      = def.failFast && errorCount > 0;
+
   logger.info(`Workflow complete`, {
-    intent:   def.intent,
-    steps:    def.steps.length,
-    success:  successCount,
-    skipped:  skippedCount,
-    ms:       Date.now() - t0,
+    intent:  def.intent,
+    steps:   def.steps.length,
+    success: successCount,
+    skipped: skippedCount,
+    errors:  errorCount,
+    aborted,
+    ms:      Date.now() - t0,
   });
 
-  return results.map(formatResult).join('\n\n');
+  return {
+    status:    aborted ? 'aborted' : 'ok',
+    assembled: results.map(formatResult).join('\n\n'),
+    results,
+  };
 }
