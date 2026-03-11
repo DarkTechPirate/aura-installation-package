@@ -93,7 +93,7 @@ export class HeartbeatRunner {
     while (iterations < MAX_TOOL_ITERATIONS) {
       iterations++;
 
-      const response = await this.llm.complete(agent.llm_tier, { system, messages, tools: allTools });
+      const response = await this.llm.complete(agent.llm_tier, { system, messages, tools: allTools }, 'background');
       const text = response.text.trim();
 
       // LLM responded with final text

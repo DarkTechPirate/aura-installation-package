@@ -9,13 +9,28 @@ import { OpenRouterAdapter } from './adapters/openrouter.js';
 import { QwenAdapter } from './adapters/qwen.js';
 import type { LLMAdapter } from './types.js';
 
+export type LLMPriority = 'user' | 'background';
+
+interface QueuedRequest {
+  priority:  LLMPriority;
+  tier:      string;
+  params:    LLMParams;
+  resolve:   (r: LLMResponse) => void;
+  reject:    (e: unknown) => void;
+}
+
 /**
  * Routes LLM requests to the correct adapter based on tier configuration.
  * Supports live config reload via reload() — no restart required.
+ *
+ * Priority queue: 'user' requests always run before 'background' (heartbeat/pulse).
+ * Only one LLM call runs at a time — Ollama is single-threaded.
  */
 export class LLMRouter {
   private config: GatewayConfig;
-  private adapters = new Map<string, LLMAdapter>();
+  private adapters  = new Map<string, LLMAdapter>();
+  private queue:    QueuedRequest[] = [];
+  private running   = false;
 
   constructor(config: GatewayConfig) {
     this.config = config;
@@ -44,12 +59,52 @@ export class LLMRouter {
 
   /**
    * Complete a prompt using the specified tier or model string.
-   * @param tier - LLM tier ('simple', 'complex', 'vision', 'creative', 'offline') or model string
+   * @param tier     - LLM tier ('simple', 'complex', 'vision', 'creative', 'offline') or model string
+   * @param params   - LLM parameters
+   * @param priority - 'user' (default) runs before 'background' (heartbeat/pulse)
    */
-  async complete(tier: string, params: LLMParams, _agent_id?: string): Promise<LLMResponse> {
-    const modelStr = this.config.llm.routing[tier] ?? this.config.llm.default;
-    const adapter = this.getAdapter(modelStr);
-    return adapter.complete(params);
+  complete(tier: string, params: LLMParams, priority: LLMPriority = 'user'): Promise<LLMResponse> {
+    return new Promise<LLMResponse>((resolve, reject) => {
+      const req: QueuedRequest = { priority, tier, params, resolve, reject };
+
+      if (priority === 'user') {
+        // Insert before any background requests already waiting
+        const insertAt = this.queue.findIndex(r => r.priority === 'background');
+        if (insertAt === -1) {
+          this.queue.push(req);
+        } else {
+          this.queue.splice(insertAt, 0, req);
+        }
+      } else {
+        this.queue.push(req);
+      }
+
+      this.drain();
+    });
+  }
+
+  private drain(): void {
+    if (this.running || this.queue.length === 0) return;
+    const req = this.queue.shift()!;
+    this.running = true;
+
+    const modelStr = this.config.llm.routing[req.tier] ?? this.config.llm.default;
+    const adapter  = this.getAdapter(modelStr);
+
+    if (req.priority === 'background' && this.queue.some(r => r.priority === 'user')) {
+      // A user request arrived while we were about to start a background one — requeue
+      this.queue.unshift(req);
+      this.running = false;
+      this.drain();
+      return;
+    }
+
+    console.log(`[LLM] Running ${req.priority} request (queue: ${this.queue.length} waiting)`);
+
+    adapter.complete(req.params).then(
+      (result) => { req.resolve(result); this.running = false; this.drain(); },
+      (err)    => { req.reject(err);    this.running = false; this.drain(); },
+    );
   }
 
   private getAdapter(modelStr: string): LLMAdapter {
