@@ -11,6 +11,7 @@ const MODEL   = 'Xenova/all-MiniLM-L6-v2';
 type EmbedPipeline = (text: string, opts: Record<string, unknown>) => Promise<{ data: Float32Array }>;
 
 interface SkillEntry { name: string; embedding: Float32Array }
+interface MetaEntry  { group: string; embedding: Float32Array }
 
 /**
  * Vector memory — stores conversation summaries as dense embeddings in SQLite.
@@ -24,6 +25,7 @@ export class VectorMemory {
   private db:         Database.Database;
   private pipe:       EmbedPipeline | null = null;
   private skillIndex: SkillEntry[] = [];
+  private metaIndex:  MetaEntry[]  = [];
 
   constructor() {
     if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
@@ -155,6 +157,37 @@ export class VectorMemory {
       console.log(`[VectorMemory] Indexed ${indexed.length} skills`);
     } catch (err) {
       console.warn('[VectorMemory] indexSkills error:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** Build an in-memory vector index of meta-tool groups. Same pattern as indexSkills. */
+  async indexMetaGroups(groups: Array<{ group: string; description: string }>): Promise<void> {
+    try {
+      const indexed: MetaEntry[] = [];
+      for (const g of groups) {
+        indexed.push({ group: g.group, embedding: await this.embed(g.description) });
+      }
+      this.metaIndex = indexed;
+      console.log(`[VectorMemory] Indexed ${indexed.length} meta-tool groups`);
+    } catch (err) {
+      console.warn('[VectorMemory] indexMetaGroups error:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** Find which meta-tool groups are relevant to the user message. */
+  async searchMetaGroups(query: string, limit = 3, threshold = 0.25): Promise<string[]> {
+    if (this.metaIndex.length === 0) return [];
+    try {
+      const qvec = await this.embed(query);
+      return this.metaIndex
+        .map(m => ({ group: m.group, score: this.cosineSim(qvec, m.embedding) }))
+        .filter(m => m.score > threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map(m => m.group);
+    } catch (err) {
+      console.debug('[VectorMemory] searchMetaGroups error:', err instanceof Error ? err.message : err);
+      return [];
     }
   }
 

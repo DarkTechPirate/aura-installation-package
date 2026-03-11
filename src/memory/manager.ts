@@ -89,6 +89,14 @@ export class MemoryManager {
     return this.vector.searchSkills(query, limit);
   }
 
+  async indexMetaGroups(groups: Array<{ group: string; description: string }>): Promise<void> {
+    await this.vector.indexMetaGroups(groups);
+  }
+
+  async searchMetaGroups(query: string, limit = 3): Promise<string[]> {
+    return this.vector.searchMetaGroups(query, limit);
+  }
+
   // ── Legacy FTS5 index (kept for backward-compat; use indexMemory instead) ─
 
   async indexEpisodic(agent_ns: string, date: string, content: string): Promise<void> {

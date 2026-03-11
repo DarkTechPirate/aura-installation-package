@@ -117,22 +117,42 @@ const META_PATTERNS: Array<{ re: RegExp; group: string }> = [
   { re: /\b(pulse|trade monitor|alert monitor|pulse status|monitor status)\b/i,                                          group: 'pulse'       },
 ];
 
-function smartLoadMetaTools(
+// Semantic descriptions for vector-based meta-group detection.
+// Written in natural language so the embedding model scores them well.
+const META_GROUP_DESCRIPTIONS = [
+  { group: 'canvas',       description: 'draw visualise display chart diagram whiteboard graph plot render show on screen canvas' },
+  { group: 'orchestrator', description: 'spawn agent team parallel sub-agents delegate coordinate workers resume agent define block template multi-agent' },
+  { group: 'self_write',   description: 'create new skill write skill build tool add capability make function extend agent' },
+  { group: 'consolidate',  description: 'consolidate memory clean up deduplicate organise memories merge facts tidy memory' },
+  { group: 'send_all',     description: 'broadcast all channels all devices send to everyone notify all push everywhere' },
+  { group: 'pulse',        description: 'pulse trade monitor alert monitor trade monitoring status check alerts' },
+];
+
+async function smartLoadMetaTools(
   message:         string,
   sessionId:       string,
+  mem:             import('./memory/manager.js').MemoryManager,
   selfWriteDef:    ToolDefinition,
   orchestratorDefs:ToolDefinition[],
   canvasDefs:      ToolDefinition[],
   memoryDefs:      ToolDefinition[],
   proactiveDefs:   ToolDefinition[],
   pulseDef:        ToolDefinition,
-): ToolDefinition[] {
+): Promise<ToolDefinition[]> {
   // Accumulate triggered groups for this session
   if (!sessionMetaCache.has(sessionId)) sessionMetaCache.set(sessionId, new Set());
   const groups = sessionMetaCache.get(sessionId)!;
+
+  // 1. Regex fast-path (catches exact keywords instantly)
   for (const { re, group } of META_PATTERNS) {
     if (re.test(message)) groups.add(group);
   }
+
+  // 2. Vector fallback (catches paraphrases regex misses: "visualise this" → canvas)
+  const FILLER = /\b(can you|please|i want|i need|help me|show me|let me|just|quickly)\b/gi;
+  const vecQuery = message.replace(FILLER, '').trim() || message;
+  const vecMatched = await mem.searchMetaGroups(vecQuery).catch(() => [] as string[]);
+  for (const group of vecMatched) groups.add(group);
 
   // Always-on core: the 3 most-used memory tools + send_message
   const ALWAYS_MEMORY    = new Set(['remember_about_user', 'remember_about_self', 'search_memory']);
@@ -149,7 +169,7 @@ function smartLoadMetaTools(
   if (groups.has('send_all'))     { const t = proactiveDefs.find(t => t.name === 'send_to_agent_channels'); if (t) result.push(t); }
   if (groups.has('pulse'))        result.push(pulseDef);
 
-  console.log(`[MetaTools] groups=[${[...groups].join(',')||'core'}] total=${result.length}`);
+  console.log(`[MetaTools] groups=[${[...groups].join(',') || 'core'}] total=${result.length}`);
   return result;
 }
 
@@ -363,6 +383,9 @@ async function main(): Promise<void> {
   };
   reindexSkills();
   skills.onSkillsChanged(reindexSkills);
+
+  // Index meta-tool groups for vector-based detection (once at startup — descriptions don't change)
+  memory.indexMetaGroups(META_GROUP_DESCRIPTIONS).catch(() => {});
 
   const orchestrator = new AgentOrchestrator(llm, skills, config);
 
@@ -666,9 +689,10 @@ async function main(): Promise<void> {
       parameters: { type: 'object', properties: {} },
     };
 
-    const metaToolDefs = smartLoadMetaTools(
+    const metaToolDefs = await smartLoadMetaTools(
       payload.text ?? '',
       event.session_id,
+      memory,
       selfWriteTool.toolDef,
       orchestrator.getToolDefs(),
       canvasToolDefs,
