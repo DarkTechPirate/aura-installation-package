@@ -122,7 +122,10 @@ export class LLMRouter {
     let model: string;
 
     if (modelStr.includes('/')) {
-      [provider, model] = modelStr.split('/', 2) as [string, string];
+      // Use indexOf to preserve slashes in model names (e.g. nvidia/moonshotai/kimi-k2.5)
+      const idx = modelStr.indexOf('/');
+      provider = modelStr.slice(0, idx);
+      model    = modelStr.slice(idx + 1);
     } else if (modelStr.startsWith('claude-')) {
       provider = 'claude';
       model = modelStr;
@@ -173,6 +176,10 @@ export class LLMRouter {
       case 'openrouter': {
         const apiKey = providerCfg?.api_key ?? process.env['OPENROUTER_API_KEY'] ?? '';
         return new OpenRouterAdapter(apiKey, model);
+      }
+      case 'nvidia': {
+        const apiKey = providerCfg?.api_key ?? process.env['NVIDIA_API_KEY'] ?? '';
+        return new OpenAIAdapter(apiKey, model, 'https://integrate.api.nvidia.com/v1');
       }
       case 'qwen': {
         const apiKey = providerCfg?.api_key ?? process.env['DASHSCOPE_API_KEY'] ?? '';
