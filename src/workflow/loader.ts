@@ -25,7 +25,7 @@ import type { WorkflowMatch } from './intent.js';
 
 const logger = createLogger('WorkflowLoader');
 
-export const WORKFLOWS_DIR = path.join(AURA_DIR, 'workflows');
+export const WORKFLOWS_DIR = path.join(AURA_DIR, 'intents');
 
 // ── YAML schema ───────────────────────────────────────────────────────────────
 
