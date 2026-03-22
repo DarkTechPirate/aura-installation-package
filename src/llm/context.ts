@@ -167,6 +167,9 @@ export class ContextBuilder {
     system += `\n- Do not ask permission before saving a memory — just save it. The user can review and reject saved memories.`;
     system += `\n- If the user corrects you on something, update your memory immediately so the mistake does not repeat.`;
 
+    // ── Perception / vision awareness ────────────────────────────────────────
+    system += `\n\nVISION: You have a \`look_around\` tool that returns real-time visual context from the user's camera or screen share — who is present, their emotion, activity, and a scene description. Use it proactively when understanding the environment would help you respond better, or when the user asks what you can see. Visual context is also automatically prepended to this system prompt when the user has perception mode active.`;
+
     // ── Skill creation rules ──────────────────────────────────────────────────
     system += `\n\nSKILL CREATION RULES (critical):`;
     system += `\n- ALWAYS use create_skill to create new skills — never write skill files manually.`;

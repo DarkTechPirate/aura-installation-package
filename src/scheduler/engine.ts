@@ -1,18 +1,20 @@
-import cron from 'node-cron';
+import { Worker } from 'worker_threads';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import type { GatewayConfig } from '../config/loader.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { ChannelManager } from '../channels/manager.js';
 
-export type HeartbeatFn = () => Promise<void>;
+export type HeartbeatFn    = () => Promise<void>;
 export type WorkflowFireFn = (name: string) => Promise<void>;
 
+const __dirname          = path.dirname(fileURLToPath(import.meta.url));
+const WORKER_PATH        = path.resolve(__dirname, 'worker.mjs');
 const PULSE_INTERVAL_SEC = parseInt(process.env.PULSE_INTERVAL_SEC ?? '30', 10);
-
-const WF_DB_PATH = path.join(os.homedir(), '.aura', 'memory', 'aura.db');
+const WF_DB_PATH         = path.join(os.homedir(), '.aura', 'memory', 'aura.db');
 
 /** Returns true if the 5-field cron expression matches the given date (minute granularity). */
 function matchesCron(expr: string, date: Date): boolean {
@@ -42,73 +44,59 @@ function matchesCron(expr: string, date: Date): boolean {
          fieldMatch(dow, date.getDay());
 }
 
-/**
- * Scheduler engine: manages cron-based heartbeat and reminder polling.
- * - Heartbeat: runs every N minutes (from config), calls heartbeatFn
- * - Reminder poll: runs every reminder_check_sec seconds, fires due reminders
- */
 import type { PulseRunner } from './pulse.js';
 
 export class SchedulerEngine {
-  private heartbeatTask:  cron.ScheduledTask | null = null;
-  private reminderTask:   cron.ScheduledTask | null = null;
-  private wfScheduleTask: cron.ScheduledTask | null = null;
-  private pulseTask:      cron.ScheduledTask | null = null;
+  private worker: Worker | null = null;
 
   constructor(
-    private readonly config: GatewayConfig,
-    private readonly memory: MemoryManager,
-    private readonly channels: ChannelManager,
-    private readonly heartbeatFn: HeartbeatFn,
+    private readonly config:          GatewayConfig,
+    private readonly memory:          MemoryManager,
+    private readonly channels:        ChannelManager,
+    private readonly heartbeatFn:     HeartbeatFn,
     private readonly workflowFireFn?: WorkflowFireFn,
-    private readonly pulseRunner?: PulseRunner,
+    private readonly pulseRunner?:    PulseRunner,
   ) {}
 
   start(): void {
     const intervalMin = this.config.scheduler.heartbeat_interval_min;
     const checkSec    = this.config.scheduler.reminder_check_sec;
 
-    // Heartbeat cron: every N minutes
-    const heartbeatCron = `*/${intervalMin} * * * *`;
-    this.heartbeatTask = cron.schedule(heartbeatCron, async () => {
-      try {
-        await this.heartbeatFn();
-      } catch (err) {
-        console.error('[Scheduler] Heartbeat error:', err);
+    this.worker = new Worker(WORKER_PATH, {
+      workerData: { intervalMin, checkSec, pulseIntervalSec: PULSE_INTERVAL_SEC },
+    });
+
+    this.worker.on('message', (msg: { type: string }) => {
+      switch (msg.type) {
+        case 'heartbeat':
+          this.heartbeatFn().catch(err =>
+            console.error('[Scheduler] Heartbeat error:', err));
+          break;
+        case 'reminder':
+          this.checkReminders().catch(err =>
+            console.error('[Scheduler] Reminder check error:', err));
+          break;
+        case 'workflow_schedule':
+          if (this.workflowFireFn) {
+            this.checkWorkflowSchedules().catch(err =>
+              console.error('[Scheduler] Workflow schedule check error:', err));
+          }
+          break;
+        case 'pulse':
+          if (this.pulseRunner) {
+            this.pulseRunner.check().catch(err =>
+              console.error('[Scheduler] Pulse error:', err));
+          }
+          break;
       }
     });
 
-    // Reminder polling: every checkSec seconds
-    const reminderCron = `*/${checkSec} * * * * *`;
-    this.reminderTask = cron.schedule(reminderCron, async () => {
-      try {
-        await this.checkReminders();
-      } catch (err) {
-        console.error('[Scheduler] Reminder check error:', err);
-      }
+    this.worker.on('error', err =>
+      console.error('[Scheduler] Worker error:', err));
+
+    this.worker.on('exit', code => {
+      if (code !== 0) console.error(`[Scheduler] Worker exited with code ${code}`);
     });
-
-    // Workflow schedule polling: every minute at :00s
-    if (this.workflowFireFn) {
-      this.wfScheduleTask = cron.schedule('* * * * *', async () => {
-        try {
-          await this.checkWorkflowSchedules();
-        } catch (err) {
-          console.error('[Scheduler] Workflow schedule check error:', err);
-        }
-      });
-    }
-
-    // Pulse: every N seconds — pure code price checks, no LLM
-    if (this.pulseRunner) {
-      this.pulseTask = cron.schedule(`*/${PULSE_INTERVAL_SEC} * * * * *`, async () => {
-        try {
-          await this.pulseRunner!.check();
-        } catch (err) {
-          console.error('[Scheduler] Pulse error:', err);
-        }
-      });
-    }
 
     console.log(`[Scheduler] Started: heartbeat every ${intervalMin}m, reminders every ${checkSec}s, pulse every ${PULSE_INTERVAL_SEC}s`);
   }
@@ -116,7 +104,6 @@ export class SchedulerEngine {
   private async checkReminders(): Promise<void> {
     const now = new Date().toISOString();
     const due = await this.memory.getPendingReminders(now);
-
     for (const reminder of due) {
       console.log(`[Scheduler] Firing reminder #${reminder.id}: "${reminder.text}" → ${reminder.target_node}`);
       try {
@@ -136,28 +123,21 @@ export class SchedulerEngine {
       const hasTable = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='wf_scheduled'`).get();
       if (!hasTable) return;
 
-      const now = new Date();
-      // Round to the current minute boundary for double-fire prevention
+      const now       = new Date();
       const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
-
       const schedules = db.prepare(`SELECT workflow_name, cron, last_run FROM wf_scheduled WHERE enabled=1`).all() as Array<{ workflow_name: string; cron: string; last_run: string | null }>;
 
       for (const row of schedules) {
         if (!matchesCron(row.cron, now)) continue;
-
-        // Prevent double-fire: skip if last_run is within the current minute
         if (row.last_run) {
-          const last = new Date(row.last_run);
+          const last    = new Date(row.last_run);
           const lastKey = `${last.getFullYear()}-${last.getMonth()}-${last.getDate()}-${last.getHours()}-${last.getMinutes()}`;
           if (lastKey === minuteKey) continue;
         }
-
         console.log(`[Scheduler] Firing scheduled workflow: ${row.workflow_name} (${row.cron})`);
         db.prepare(`UPDATE wf_scheduled SET last_run=? WHERE workflow_name=?`).run(now.toISOString(), row.workflow_name);
-
         this.workflowFireFn!(row.workflow_name).catch(err =>
-          console.error(`[Scheduler] Failed to fire workflow ${row.workflow_name}:`, err)
-        );
+          console.error(`[Scheduler] Failed to fire workflow ${row.workflow_name}:`, err));
       }
     } finally {
       db?.close();
@@ -165,14 +145,8 @@ export class SchedulerEngine {
   }
 
   stop(): void {
-    this.heartbeatTask?.stop();
-    this.reminderTask?.stop();
-    this.wfScheduleTask?.stop();
-    this.pulseTask?.stop();
-    this.heartbeatTask  = null;
-    this.reminderTask   = null;
-    this.wfScheduleTask = null;
-    this.pulseTask      = null;
+    this.worker?.terminate();
+    this.worker = null;
     console.log('[Scheduler] Stopped');
   }
 }

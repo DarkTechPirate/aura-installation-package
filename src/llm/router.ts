@@ -9,28 +9,46 @@ import { OpenRouterAdapter } from './adapters/openrouter.js';
 import { QwenAdapter } from './adapters/qwen.js';
 import type { LLMAdapter } from './types.js';
 
-export type LLMPriority = 'user' | 'background';
+export type LLMPriority = 'user' | 'agent' | 'background';
+
+// Max parallel LLM calls for agent sub-agents (cloud providers handle concurrency fine)
+const AGENT_MAX_CONCURRENT = 4;
 
 interface QueuedRequest {
-  priority:  LLMPriority;
-  tier:      string;
-  params:    LLMParams;
-  resolve:   (r: LLMResponse) => void;
-  reject:    (e: unknown) => void;
+  tier:    string;
+  params:  LLMParams;
+  resolve: (r: LLMResponse) => void;
+  reject:  (e: unknown) => void;
+}
+
+interface SessionLane {
+  queue:   QueuedRequest[];
+  running: boolean;
 }
 
 /**
  * Routes LLM requests to the correct adapter based on tier configuration.
  * Supports live config reload via reload() — no restart required.
  *
- * Priority queue: 'user' requests always run before 'background' (heartbeat/pulse).
- * Only one LLM call runs at a time — Ollama is single-threaded.
+ * Three independent lanes:
+ *   user       — per-session serialization; multiple sessions run in parallel
+ *   agent      — parallel pool (max AGENT_MAX_CONCURRENT); for spawn_team sub-agents
+ *   background — single queue, sequential; heartbeat/pulse never blocks user lanes
  */
 export class LLMRouter {
-  private config: GatewayConfig;
+  private config:   GatewayConfig;
   private adapters  = new Map<string, LLMAdapter>();
-  private queue:    QueuedRequest[] = [];
-  private running   = false;
+
+  // Lane 1: per-session user calls (session_id → lane)
+  private sessionLanes = new Map<string, SessionLane>();
+
+  // Lane 2: agent sub-calls (semaphore pool)
+  private agentActive = 0;
+  private agentQueue: QueuedRequest[] = [];
+
+  // Lane 3: background calls (single sequential queue)
+  private bgQueue:   QueuedRequest[] = [];
+  private bgRunning  = false;
 
   constructor(config: GatewayConfig) {
     this.config = config;
@@ -59,52 +77,118 @@ export class LLMRouter {
 
   /**
    * Complete a prompt using the specified tier or model string.
-   * @param tier     - LLM tier ('simple', 'complex', 'vision', 'creative', 'offline') or model string
-   * @param params   - LLM parameters
-   * @param priority - 'user' (default) runs before 'background' (heartbeat/pulse)
+   * @param tier      - LLM tier ('simple', 'complex', 'vision', etc.) or model string
+   * @param params    - LLM parameters
+   * @param priority  - 'user' (default) | 'agent' (parallel pool) | 'background' (heartbeat)
+   * @param sessionId - Session identifier for per-session user lane serialization
    */
-  complete(tier: string, params: LLMParams, priority: LLMPriority = 'user'): Promise<LLMResponse> {
+  complete(
+    tier:      string,
+    params:    LLMParams,
+    priority:  LLMPriority = 'user',
+    sessionId: string      = 'default',
+  ): Promise<LLMResponse> {
     return new Promise<LLMResponse>((resolve, reject) => {
-      const req: QueuedRequest = { priority, tier, params, resolve, reject };
+      const req: QueuedRequest = { tier, params, resolve, reject };
 
-      if (priority === 'user') {
-        // Insert before any background requests already waiting
-        const insertAt = this.queue.findIndex(r => r.priority === 'background');
-        if (insertAt === -1) {
-          this.queue.push(req);
-        } else {
-          this.queue.splice(insertAt, 0, req);
-        }
+      if (priority === 'agent') {
+        this.agentEnqueue(req);
+      } else if (priority === 'background') {
+        this.bgQueue.push(req);
+        this.bgDrain();
       } else {
-        this.queue.push(req);
+        // Lane 1: per-session — serialized within a session, parallel across sessions
+        let lane = this.sessionLanes.get(sessionId);
+        if (!lane) {
+          lane = { queue: [], running: false };
+          this.sessionLanes.set(sessionId, lane);
+        }
+        lane.queue.push(req);
+        this.sessionDrain(sessionId, lane);
       }
-
-      this.drain();
     });
   }
 
-  private drain(): void {
-    if (this.running || this.queue.length === 0) return;
-    const req = this.queue.shift()!;
-    this.running = true;
+  // ── Lane 1: per-session user calls ────────────────────────────────────────
 
-    const modelStr = this.config.llm.routing[req.tier] ?? this.config.llm.default;
-    const adapter  = this.getAdapter(modelStr);
+  private sessionDrain(sid: string, lane: SessionLane): void {
+    if (lane.running || lane.queue.length === 0) return;
+    const req = lane.queue.shift()!;
+    lane.running = true;
 
-    if (req.priority === 'background' && this.queue.some(r => r.priority === 'user')) {
-      // A user request arrived while we were about to start a background one — requeue
-      this.queue.unshift(req);
-      this.running = false;
-      this.drain();
-      return;
-    }
-
-    console.log(`[LLM] Running ${req.priority} request (queue: ${this.queue.length} waiting)`);
+    const adapter = this.resolveAdapter(req.tier);
+    console.log(`[LLM] [session:${sid}] Running (queue: ${lane.queue.length} waiting)`);
 
     adapter.complete(req.params).then(
-      (result) => { req.resolve(result); this.running = false; this.drain(); },
-      (err)    => { req.reject(err);    this.running = false; this.drain(); },
+      (result) => {
+        req.resolve(result);
+        lane.running = false;
+        if (lane.queue.length === 0) {
+          this.sessionLanes.delete(sid); // cleanup idle lanes
+        } else {
+          this.sessionDrain(sid, lane);
+        }
+      },
+      (err) => {
+        req.reject(err);
+        lane.running = false;
+        if (lane.queue.length === 0) {
+          this.sessionLanes.delete(sid);
+        } else {
+          this.sessionDrain(sid, lane);
+        }
+      },
     );
+  }
+
+  // ── Lane 2: agent sub-calls (semaphore pool) ──────────────────────────────
+
+  private agentEnqueue(req: QueuedRequest): void {
+    if (this.agentActive < AGENT_MAX_CONCURRENT) {
+      this.agentRun(req);
+    } else {
+      this.agentQueue.push(req);
+    }
+  }
+
+  private agentRun(req: QueuedRequest): void {
+    this.agentActive++;
+    const adapter = this.resolveAdapter(req.tier);
+    console.log(`[LLM] [agent] Running (active: ${this.agentActive}/${AGENT_MAX_CONCURRENT}, queued: ${this.agentQueue.length})`);
+
+    adapter.complete(req.params).then(
+      (result) => { req.resolve(result); this.agentActive--; this.agentDrain(); },
+      (err)    => { req.reject(err);    this.agentActive--; this.agentDrain(); },
+    );
+  }
+
+  private agentDrain(): void {
+    if (this.agentQueue.length > 0 && this.agentActive < AGENT_MAX_CONCURRENT) {
+      this.agentRun(this.agentQueue.shift()!);
+    }
+  }
+
+  // ── Lane 3: background calls ───────────────────────────────────────────────
+
+  private bgDrain(): void {
+    if (this.bgRunning || this.bgQueue.length === 0) return;
+    const req = this.bgQueue.shift()!;
+    this.bgRunning = true;
+
+    const adapter = this.resolveAdapter(req.tier);
+    console.log(`[LLM] [background] Running (queue: ${this.bgQueue.length} waiting)`);
+
+    adapter.complete(req.params).then(
+      (result) => { req.resolve(result); this.bgRunning = false; this.bgDrain(); },
+      (err)    => { req.reject(err);    this.bgRunning = false; this.bgDrain(); },
+    );
+  }
+
+  // ── Adapter resolution ────────────────────────────────────────────────────
+
+  private resolveAdapter(tier: string): LLMAdapter {
+    const modelStr = this.config.llm.routing[tier] ?? this.config.llm.default;
+    return this.getAdapter(modelStr);
   }
 
   private getAdapter(modelStr: string): LLMAdapter {

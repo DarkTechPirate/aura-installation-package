@@ -13,6 +13,7 @@ import type { SkillsEngine } from '../skills/engine.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { CanvasRenderer } from '../canvas/renderer.js';
 import type { AgentOrchestrator } from '../agents/orchestrator.js';
+import type { AnthropicProxy } from '../llm/anthropic_proxy.js';
 
 export interface HeartbeatLogEntry {
   ts:          number;
@@ -203,6 +204,7 @@ export interface RestAPIParams {
   orchestrator:     AgentOrchestrator;
   tokenStats:       TokenStats;
   getPulseStatus:   () => import('../scheduler/pulse.js').PulseStatus;
+  anthropicProxy:   AnthropicProxy;
 }
 
 const VERSION = '1.0.0';
@@ -313,6 +315,11 @@ export class RestAPI {
     try {
       // --- Health ---
       // --- Browser Extension ---
+      // --- Anthropic-compatible proxy (AURA acts as LLM for Claude Code) ---
+      if (method === 'POST' && path === '/proxy/v1/messages') {
+        return this.params.anthropicProxy.handle(req, res);
+      }
+
       if (method === 'GET' && path === '/api/extension/status') {
         return this.json(res, 200, { connected: extensionClients.size > 0, clients: extensionClients.size });
       }

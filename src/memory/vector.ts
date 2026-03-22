@@ -175,7 +175,7 @@ export class VectorMemory {
   }
 
   /** Find which meta-tool groups are relevant to the user message. */
-  async searchMetaGroups(query: string, limit = 3, threshold = 0.25): Promise<string[]> {
+  async searchMetaGroups(query: string, limit = 3, threshold = 0.37): Promise<string[]> {
     if (this.metaIndex.length === 0) return [];
     try {
       const qvec = await this.embed(query);

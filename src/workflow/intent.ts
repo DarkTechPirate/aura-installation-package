@@ -12,6 +12,7 @@ export type IntentName =
   | 'market_scan'
   | 'account_review'
   | 'pre_trade_check'
+  | 'instrument_analysis'
   | 'close_trade'
   | 'cancel_order'
   | 'update_sltp'
@@ -44,6 +45,8 @@ const INSTRUMENT_ALIASES: Array<[RegExp, string]> = [
 
 const SIDE_BUY  = /\b(buy|long|bullish|go long|buying)\b/i;
 const SIDE_SELL = /\b(sell|short|bearish|go short|selling)\b/i;
+
+const ANALYSIS_RE = /\b(analys[ei]s?|analyse|analyze|deep.?dive|technical|chart|look at|review|check|signal|setup|what.?s happening|how.?is|hows)\b/i;
 
 // ── Forex intent patterns ─────────────────────────────────────────────────────
 const MARKET_SCAN_RE = /\b(scan|explore|market|what should i trade|best setup|opportunit|top picks?|watch.?list|what.?s hot|find.?trade|market overview|market check|market update|hows.?the|how.?is.?the|market condition|trade today|trading today|any setup|good trade)\b/i;
@@ -91,6 +94,11 @@ export function detectIntent(text: string): WorkflowMatch | null {
   // 1. pre_trade_check — instrument + side both present
   if (instrument && side) {
     return { intent: 'pre_trade_check', instrument, side };
+  }
+
+  // 1b. instrument_analysis — instrument present, no side, analysis-type message
+  if (instrument && !side && ANALYSIS_RE.test(text)) {
+    return { intent: 'instrument_analysis', instrument };
   }
 
   // 2. close_trade — must detect before quick_quote (instrument alone would match)

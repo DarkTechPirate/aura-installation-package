@@ -64,13 +64,13 @@ const SecuritySectionSchema = z.object({
 });
 
 const GatewayConfigSchema = z.object({
-  agent:     AgentSectionSchema.optional().transform(v => v ?? AgentSectionSchema.parse({})),
-  llm:       LlmSectionSchema.optional().transform(v => v ?? LlmSectionSchema.parse({})),
-  channels:  z.record(z.string(), ChannelEntrySchema).optional().transform(v => v ?? {}),
-  voice:     VoiceSectionSchema.optional().transform(v => v ?? VoiceSectionSchema.parse({})),
-  canvas:    CanvasSectionSchema.optional().transform(v => v ?? CanvasSectionSchema.parse({})),
-  scheduler: SchedulerSectionSchema.optional().transform(v => v ?? SchedulerSectionSchema.parse({})),
-  security:  SecuritySectionSchema.optional().transform(v => v ?? SecuritySectionSchema.parse({})),
+  agent:      AgentSectionSchema.optional().transform(v => v ?? AgentSectionSchema.parse({})),
+  llm:        LlmSectionSchema.optional().transform(v => v ?? LlmSectionSchema.parse({})),
+  channels:   z.record(z.string(), ChannelEntrySchema).optional().transform(v => v ?? {}),
+  voice:      VoiceSectionSchema.optional().transform(v => v ?? VoiceSectionSchema.parse({})),
+  canvas:     CanvasSectionSchema.optional().transform(v => v ?? CanvasSectionSchema.parse({})),
+  scheduler:  SchedulerSectionSchema.optional().transform(v => v ?? SchedulerSectionSchema.parse({})),
+  security:   SecuritySectionSchema.optional().transform(v => v ?? SecuritySectionSchema.parse({})),
 });
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;

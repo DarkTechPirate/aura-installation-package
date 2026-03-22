@@ -39,6 +39,8 @@ export class WebChatAdapter implements ChannelAdapter {
   private bindAddress = '127.0.0.1';
   private persona     = 'You are AURA, a helpful AI assistant.';
   private voiceSessions    = new Map<string, string>(); // node_id → tts mode ('elevenlabs'|'browser')
+  // Throttle proactive events: session_id+event → last fire timestamp
+  private proactiveTs      = new Map<string, number>();
 
   /** Inject gateway metadata before init(). */
   setMeta(canvasPort: number, restPort: number, agentName: string, bindAddress: string, persona?: string): void {
@@ -156,7 +158,13 @@ export class WebChatAdapter implements ChannelAdapter {
       } catch { /* ignore malformed messages */ }
     });
 
-    ws.on('close', () => this.sessions.delete(node_id));
+    ws.on('close', () => {
+      this.sessions.delete(node_id);
+      // Clean up proactive rate-limit entries for this session
+      for (const key of this.proactiveTs.keys()) {
+        if (key.startsWith(session_id + ':')) this.proactiveTs.delete(key);
+      }
+    });
   }
 
   // ── Realtime connection — Qwen handles voice I/O, AURA handles the thinking ─

@@ -548,6 +548,41 @@
     #cam-pending-remove { margin-left: auto; cursor: pointer; opacity: 0.6; font-size: 16px; line-height: 1; }
     #cam-pending-remove:hover { opacity: 1; color: var(--red); }
 
+    /* ── Perception mode button + status strip ──────────────────────────────── */
+    #percept-btn { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface3); color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+    #percept-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+    #percept-btn.active { background: rgba(168,85,247,0.15); border-color: #a855f7; color: #a855f7; }
+    #percept-btn svg { width: 16px; height: 16px; }
+    #percept-status {
+      display: none; align-items: center; gap: 8px; padding: 6px 10px;
+      margin-bottom: 8px; border-radius: 8px;
+      background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3);
+      font-size: 12px; color: #c084fc; white-space: nowrap; overflow: hidden;
+    }
+    #percept-status.show { display: flex; }
+    #percept-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #a855f7; flex-shrink: 0; animation: pulse-dot 2s infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    #percept-status-text { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+
+    /* ── Enroll face button + dialog ────────────────────────────────────────── */
+    #enroll-btn { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface3); color: var(--text-dim); cursor: pointer; display: none; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+    #enroll-btn.show { display: flex; }
+    #enroll-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+    #enroll-btn.capturing { background: rgba(20,184,166,0.15); border-color: var(--teal); color: var(--teal); }
+    #enroll-btn svg { width: 16px; height: 16px; }
+    #enroll-dialog { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; }
+    #enroll-dialog.show { display: flex; }
+    #enroll-dialog-box { background: var(--surface2); border: 1px solid var(--border2); border-radius: 14px; padding: 24px; width: 340px; display: flex; flex-direction: column; gap: 14px; }
+    #enroll-dialog-box h3 { margin: 0; font-size: 15px; color: var(--text); }
+    #enroll-dialog-box p  { margin: 0; font-size: 12px; color: var(--text-dim); }
+    #enroll-dialog-box input { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border2); background: var(--surface3); color: var(--text); font-size: 13px; outline: none; }
+    #enroll-dialog-box input:focus { border-color: var(--teal); }
+    #enroll-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #enroll-dialog-actions button { padding: 7px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid var(--border2); }
+    #enroll-cancel-btn  { background: var(--surface3); color: var(--text-dim); }
+    #enroll-confirm-btn { background: var(--teal-dim); border-color: var(--teal); color: var(--teal); }
+    #enroll-progress    { font-size: 12px; color: var(--teal); text-align: center; min-height: 18px; }
+
     /* ── Realtime button ────────────────────────────────────────────────────── */
     #realtime-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface3); color: var(--text-dim); font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0; transition: all 0.15s; white-space: nowrap; }
     #realtime-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
@@ -684,6 +719,26 @@
     .badge-running      { background: var(--accent-dim); color: var(--accent); }
     .badge-done         { background: var(--teal-dim);   color: var(--teal); }
     .badge-error        { background: var(--red-dim);    color: var(--red); }
+
+    /* ── Claude Code panel ──────────────────────────────────────────────── */
+    .cc-empty { color: var(--text-dim); font-size: 13px; padding: 40px 0; text-align: center; line-height: 1.8; }
+    .cc-run-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; animation: fadeUp 0.2s ease; }
+    .cc-run-header { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+    .cc-run-title { flex: 1; font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cc-run-cost  { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+    .cc-run-status { font-size: 15px; flex-shrink: 0; }
+    .cc-tools { padding: 4px 0; }
+    .cc-tool-row { display: flex; align-items: center; gap: 8px; padding: 5px 14px; font-size: 12px; font-family: var(--mono); border-bottom: 1px solid rgba(255,255,255,0.03); }
+    .cc-tool-row:last-child { border-bottom: none; }
+    .cc-tool-icon { width: 16px; text-align: center; flex-shrink: 0; font-size: 13px; }
+    .cc-tool-name { color: var(--accent); font-weight: 500; min-width: 50px; flex-shrink: 0; }
+    .cc-tool-input { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cc-tool-badge { flex-shrink: 0; font-size: 13px; }
+    .cc-run-footer { padding: 7px 14px; font-size: 11px; color: var(--text-faint); background: var(--surface2); border-top: 1px solid var(--border); }
+    @keyframes cc-spin { to { transform: rotate(360deg); } }
+    .cc-spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: cc-spin 0.7s linear infinite; vertical-align: middle; }
+    .cc-nav-badge { position: absolute; top: 3px; right: 3px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; border-radius: 8px; padding: 1px 4px; min-width: 14px; text-align: center; line-height: 14px; pointer-events: none; }
+    .nav-item { position: relative; }
   </style>
 </head>
 <body>
@@ -762,6 +817,14 @@
       Photos
     </div>
 
+    <div class="nav-item" data-panel="code" onclick="showPanel('code')" title="Claude Code">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+      </svg>
+      <span id="cc-nav-badge" class="cc-nav-badge" style="display:none">0</span>
+      Code
+    </div>
+
     <div class="nav-spacer"></div>
   </nav>
 
@@ -833,6 +896,11 @@
               <span id="rt-dot"></span>
               <span id="rt-status-text">Connecting…</span>
             </div>
+            <!-- Perception status strip -->
+            <div id="percept-status">
+              <div id="percept-status-dot"></div>
+              <span id="percept-status-text">Perceiving…</span>
+            </div>
             <!-- Pending snapshot badge -->
             <div id="cam-pending">
               <img id="cam-pending-thumb" src="" alt="snapshot"/>
@@ -869,6 +937,21 @@
                 <option value="elevenlabs">TTS: ElevenLabs</option>
                 <option value="browser">TTS: Browser</option>
               </select>
+              <!-- Perception mode button — sends periodic frames to PERCY for live analysis -->
+              <button id="percept-btn" title="Enable perception mode — AURA continuously watches camera/screen" onclick="perceptToggle()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+              <!-- Enroll face button — shown when camera is active -->
+              <button id="enroll-btn" title="Enroll your face so AURA can recognize you" onclick="enrollOpen()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                  <line x1="19" y1="8" x2="23" y2="8"/><line x1="21" y1="6" x2="21" y2="10"/>
+                </svg>
+              </button>
               <!-- Screen share button -->
               <button id="screen-btn" title="Share your screen" onclick="screenToggle()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1107,6 +1190,17 @@
       </div>
     </div>
 
+    <div id="panel-code" class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Claude Code</div>
+        <div class="panel-sub">Live activity feed — real-time tool calls and results</div>
+      </div>
+      <div class="panel-body">
+        <div id="cc-empty" class="cc-empty">No Claude Code runs yet.<br>Ask your agent to complete a coding task.</div>
+        <div id="cc-runs"></div>
+      </div>
+    </div>
+
   </div><!-- #content -->
 
 </div><!-- #app -->
@@ -1223,15 +1317,30 @@ function connect() {
         document.getElementById('mic-transcript-text').textContent = '🎤 ' + msg.text;
         document.getElementById('mic-transcript').classList.add('show');
         setTimeout(() => document.getElementById('mic-transcript').classList.remove('show'), 4000);
+      } else if (msg.type === 'message' && msg.text && msg.text.startsWith('{"__cc"')) {
+        hideTyping();
+        try { handleClaudeCodeEvent(JSON.parse(msg.text)); } catch {}
       } else if (msg.type === 'message') {
         hideTyping();
-        appendMsg('agent', msg.text);
+        const msgEl = appendMsg('agent', msg.text);
+        // Proactive messages include feedback metadata — show thumbs up/down
+        if (msg.feedback && msg.feedback.user_id) {
+          const fb = msg.feedback;
+          const fbEl = document.createElement('div');
+          fbEl.style.cssText = 'display:flex;gap:6px;margin-top:4px;font-size:13px;';
+          fbEl.innerHTML = `<span style="color:var(--text-dim);font-size:11px;">Helpful?</span>
+            <button onclick="sendFeedback('${fb.user_id}','${fb.action_type}','positive',this.parentElement)" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 2px;" title="Helpful">👍</button>
+            <button onclick="sendFeedback('${fb.user_id}','${fb.action_type}','negative',this.parentElement)" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 2px;" title="Not helpful">👎</button>`;
+          if (msgEl) msgEl.appendChild(fbEl);
+        }
         if (msg.audio_b64) {
           const audio = new Audio('data:' + (msg.audio_mime || 'audio/mpeg') + ';base64,' + msg.audio_b64);
           audio.play().catch(() => {});
         } else if (msg.speak && msg.text) {
           speakText(msg.text);
         }
+      } else if (msg.type === 'perception_update') {
+        handlePerceptionUpdate(msg);
       }
     } catch {}
   };
@@ -1399,6 +1508,7 @@ function appendMsg(role, text) {
   tsEl.textContent = time;
 
   scrollBottom();
+  return bubble;
 }
 
 function scrollBottom() { $msgs.scrollTo({ top: $msgs.scrollHeight, behavior: 'smooth' }); }
@@ -1419,6 +1529,7 @@ async function camToggle() {
     video.srcObject = camStream;
     document.getElementById('cam-preview').classList.add('show');
     document.getElementById('cam-btn').classList.add('active');
+    document.getElementById('enroll-btn').classList.add('show');
   } catch (e) {
     alert('Camera access denied or unavailable: ' + e.message);
   }
@@ -1428,8 +1539,10 @@ function camStop() {
   if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   document.getElementById('cam-preview').classList.remove('show');
   document.getElementById('cam-btn').classList.remove('active');
+  document.getElementById('enroll-btn').classList.remove('show');
   const video = document.getElementById('cam-video');
   video.srcObject = null;
+  _perceptAutoStop();
 }
 
 function camSnap() {
@@ -1488,10 +1601,227 @@ async function screenToggle() {
       document.getElementById('cam-preview').classList.remove('show');
       document.getElementById('screen-btn').classList.remove('active');
       video.srcObject = null;
+      _perceptAutoStop();
     });
   } catch (e) {
     if (e.name !== 'NotAllowedError') alert('Screen share failed: ' + e.message);
   }
+}
+
+// ── Perception mode ───────────────────────────────────────────────────────────
+// Continuously sends frames from the active camera or screen share to the server
+// for PERCY analysis. The server stores the perception context and injects it
+// into every LLM system prompt while perception mode is active.
+let perceptActive   = false;
+let perceptInterval = null;
+
+function perceptToggle() {
+  if (perceptActive) {
+    _perceptStop();
+  } else {
+    if (!camStream && !screenStream) {
+      alert('Enable the camera or screen share first, then activate perception mode.');
+      return;
+    }
+    _perceptStart();
+  }
+}
+
+function _perceptStart() {
+  perceptActive = true;
+  document.getElementById('percept-btn').classList.add('active');
+  document.getElementById('percept-status').classList.add('show');
+  document.getElementById('percept-status-text').textContent = 'Perceiving…';
+  const intervalMs = screenStream ? 5000 : 3000;
+  // Sync current vision tier to PERCY so it uses the same model the user already chose
+  _percySetVisionTier(currentVisionTier);
+  // Send first frame immediately, then on interval
+  _perceptSendFrame();
+  perceptInterval = setInterval(_perceptSendFrame, intervalMs);
+}
+
+function _perceptStop() {
+  perceptActive = false;
+  if (perceptInterval) { clearInterval(perceptInterval); perceptInterval = null; }
+  document.getElementById('percept-btn').classList.remove('active');
+  document.getElementById('percept-status').classList.remove('show');
+}
+
+function _perceptSendFrame() {
+  const video = document.getElementById('cam-video');
+  if (!video || !video.srcObject || video.readyState < 2) return;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const dataUrl   = canvas.toDataURL('image/jpeg', 0.75);
+    const image_b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+    const source    = screenStream ? 'screen' : 'camera';
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'perception_frame', image_b64, source }));
+    }
+  } catch (e) {
+    console.warn('[Perception] Frame capture failed:', e);
+  }
+}
+
+// Handle perception_update messages from server
+// ── Claude Code panel ──────────────────────────────────────────────────────
+const ccRuns       = new Map(); // run_id → { card, toolsEl, activeRuns }
+let   ccActiveRuns = 0;
+
+const CC_ICONS = {
+  Read: '📖', Glob: '🔍', Grep: '🔎', Bash: '🖥️',
+  Edit: '✏️', Write: '📝', WebFetch: '🌐', Agent: '🤖',
+};
+function ccIcon(tool) { return CC_ICONS[tool] || '🔧'; }
+
+function ccInputSummary(input) {
+  if (!input) return '';
+  if (typeof input === 'string') return input.slice(0, 80);
+  const v = Object.values(input);
+  if (!v.length) return '';
+  return String(v[0]).slice(0, 80);
+}
+
+function updateCcBadge() {
+  const badge = document.getElementById('cc-nav-badge');
+  if (!badge) return;
+  if (ccActiveRuns > 0) {
+    badge.textContent = ccActiveRuns;
+    badge.style.display = 'block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function handleClaudeCodeEvent(ev) {
+  const { run_id, event, task } = ev;
+  const $empty = document.getElementById('cc-empty');
+  const $runs  = document.getElementById('cc-runs');
+
+  if (event === 'run_start') {
+    if ($empty) $empty.style.display = 'none';
+
+    // Create run card
+    const card = document.createElement('div');
+    card.className = 'cc-run-card';
+    card.id = 'cc-run-' + run_id;
+    card.innerHTML = `
+      <div class="cc-run-header">
+        <span class="cc-run-status" id="cc-status-${run_id}"><span class="cc-spinner"></span></span>
+        <span class="cc-run-title">${esc(task || 'Running…')}</span>
+        <span class="cc-run-cost" id="cc-cost-${run_id}"></span>
+      </div>
+      <div class="cc-tools" id="cc-tools-${run_id}"></div>`;
+    $runs.prepend(card);
+    ccRuns.set(run_id, { card, toolsEl: card.querySelector('#cc-tools-' + run_id), toolRows: new Map() });
+    ccActiveRuns++;
+    updateCcBadge();
+
+    // Flash Code nav item
+    const nav = document.querySelector('.nav-item[data-panel="code"]');
+    if (nav) nav.style.color = 'var(--accent)';
+    return;
+  }
+
+  const run = ccRuns.get(run_id);
+  if (!run) return;
+
+  if (event === 'tool_call') {
+    const rowId = 'cc-tr-' + (ev.tool_id || Date.now());
+    const row = document.createElement('div');
+    row.className = 'cc-tool-row';
+    row.id = rowId;
+    row.innerHTML = `
+      <span class="cc-tool-icon">${ccIcon(ev.tool)}</span>
+      <span class="cc-tool-name">${esc(ev.tool || '')}</span>
+      <span class="cc-tool-input">${esc(ccInputSummary(ev.input))}</span>
+      <span class="cc-tool-badge"><span class="cc-spinner"></span></span>`;
+    run.toolsEl.appendChild(row);
+    if (ev.tool_id) run.toolRows.set(ev.tool_id, rowId);
+    // Auto-scroll panel body
+    const body = document.querySelector('#panel-code .panel-body');
+    if (body) body.scrollTop = body.scrollHeight;
+  } else if (event === 'tool_result') {
+    const rowId = run.toolRows.get(ev.tool_id) || null;
+    const row   = rowId ? document.getElementById(rowId) : null;
+    if (row) {
+      const badge = row.querySelector('.cc-tool-badge');
+      if (badge) badge.innerHTML = ev.is_error ? '✗' : '✓';
+      if (badge) badge.style.color = ev.is_error ? 'var(--red)' : 'var(--teal)';
+    }
+  } else if (event === 'done' || event === 'error') {
+    ccActiveRuns = Math.max(0, ccActiveRuns - 1);
+    updateCcBadge();
+
+    // Update status icon
+    const statusEl = document.getElementById('cc-status-' + run_id);
+    if (statusEl) statusEl.textContent = event === 'done' ? '✅' : '❌';
+
+    // Update cost
+    const costEl = document.getElementById('cc-cost-' + run_id);
+    if (costEl && ev.cost_usd != null) {
+      const ms = ev.duration_ms ? ` · ${(ev.duration_ms/1000).toFixed(1)}s` : '';
+      costEl.textContent = `$${Number(ev.cost_usd).toFixed(4)}${ms}`;
+    }
+
+    // Add footer
+    if (!run.card.querySelector('.cc-run-footer')) {
+      const foot = document.createElement('div');
+      foot.className = 'cc-run-footer';
+      const toolCount = run.toolRows ? run.toolRows.size : 0;
+      foot.textContent = event === 'done'
+        ? `✅ Done · ${toolCount} tool call${toolCount !== 1 ? 's' : ''}`
+        : `❌ ${esc(ev.error || 'Error')}`;
+      run.card.appendChild(foot);
+    }
+
+    // Reset Code nav item colour after a moment
+    setTimeout(() => {
+      const nav = document.querySelector('.nav-item[data-panel="code"]');
+      if (nav) nav.style.color = '';
+    }, 2000);
+  }
+}
+
+function handlePerceptionUpdate(data) {
+  if (!perceptActive) return;
+  const ctx  = data.context ?? {};
+  const src  = ctx.source === 'screen' ? '🖥' : '👤';
+  let label  = '';
+  if (ctx.source === 'screen') {
+    label = ctx.scene_description
+      ? `${src} ${ctx.scene_description.slice(0, 100)}`
+      : `${src} Screen share active`;
+  } else {
+    const name  = ctx.user_display_name ?? 'Unknown';
+    const emo   = ctx.emotion ?? '';
+    const act   = ctx.activity ?? '';
+    label = `${src} ${name} · ${emo}${act ? ' · ' + act : ''}`;
+    const notable = ctx.notable_events ?? [];
+    if (notable.length) label += ' · ⚡ ' + notable[0];
+    // Show Tier 3 scene description when available (appears ~10s after first frame)
+    if (ctx.scene_description) label += '  —  ' + ctx.scene_description.slice(0, 100);
+  }
+  const el = document.getElementById('percept-status-text');
+  el.textContent = label;
+  el.title = ctx.scene_description ?? '';
+}
+
+// Auto-stop perception mode when camera/screen is stopped
+function _perceptAutoStop() {
+  if (perceptActive && !camStream && !screenStream) _perceptStop();
+}
+
+// Sync the user's vision tier choice to PERCY — called on perceptStart and on tier change
+function _percySetVisionTier(tier) {
+  fetch('/api/perception/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vision_tier: tier }),
+  }).catch(e => console.warn('[Percy] Vision tier sync failed:', e));
 }
 
 // ── Mic recording ────────────────────────────────────────────────────────────
@@ -1549,6 +1879,8 @@ function setVisionTier(tier) {
   document.getElementById('vtog-local').classList.toggle('local',  tier === 'local_vision');
   document.getElementById('vtog-cloud').classList.toggle('active', tier === 'vision');
   document.getElementById('vtog-qwen').classList.toggle('active',  tier === 'video');
+  // Keep PERCY in sync — when perception is active, switch its model to match
+  if (perceptActive) _percySetVisionTier(tier);
 }
 
 // ── Send ───────────────────────────────────────────────────────────────────
@@ -1632,7 +1964,7 @@ function hideErr(id) {
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────
-const ALL_PANELS = ['chat', 'skills', 'nodes', 'memory', 'status', 'settings', 'usage', 'agents', 'screenshots'];
+const ALL_PANELS = ['chat', 'skills', 'nodes', 'memory', 'status', 'settings', 'usage', 'agents', 'screenshots', 'code'];
 let activePanel = 'chat';
 
 function stopPanelRefresh() {
@@ -2505,6 +2837,97 @@ function stopRealtime(reason) {
     document.getElementById('realtime-status').classList.remove('show');
   }
 }
+
+// ── Perception feedback ───────────────────────────────────────────────────────
+async function sendFeedback(userId, actionType, outcome, containerEl) {
+  try {
+    const restPort = window.__AURA_REST_PORT__ || 3002;
+    await fetch(`http://localhost:${restPort}/api/perception/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, action_type: actionType, outcome }),
+    });
+    if (containerEl) containerEl.innerHTML = `<span style="font-size:11px;color:var(--text-dim);">${outcome === 'positive' ? '👍 Thanks!' : '👎 Got it'}</span>`;
+  } catch (e) {
+    console.warn('[Perception] Feedback error:', e);
+  }
+}
+
+// ── Face enrollment ───────────────────────────────────────────────────────────
+function enrollOpen() {
+  if (!camStream) { alert('Enable the camera first.'); return; }
+  document.getElementById('enroll-dialog').classList.add('show');
+  document.getElementById('enroll-progress').textContent = '';
+  document.getElementById('enroll-name-input').value = '';
+  document.getElementById('enroll-id-input').value   = '';
+}
+
+function enrollClose() {
+  document.getElementById('enroll-dialog').classList.remove('show');
+}
+
+async function enrollConfirm() {
+  const displayName = document.getElementById('enroll-name-input').value.trim();
+  const userId      = document.getElementById('enroll-id-input').value.trim()
+                      || displayName.toLowerCase().replace(/\s+/g, '_');
+  if (!displayName) { alert('Please enter your name.'); return; }
+
+  const btn = document.getElementById('enroll-confirm-btn');
+  const progress = document.getElementById('enroll-progress');
+  btn.disabled = true;
+  document.getElementById('enroll-btn').classList.add('capturing');
+
+  const frames = [];
+  const total  = 10;
+  for (let i = 0; i < total; i++) {
+    progress.textContent = `Capturing frame ${i+1}/${total}…`;
+    const video  = document.getElementById('cam-video');
+    if (video && video.srcObject && video.readyState >= 2) {
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth || 640; c.height = video.videoHeight || 480;
+      c.getContext('2d').drawImage(video, 0, 0);
+      frames.push(c.toDataURL('image/jpeg', 0.8).replace(/^data:image\/\w+;base64,/, ''));
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  progress.textContent = 'Enrolling…';
+  try {
+    const restPort = window.__AURA_REST_PORT__ || 3002;
+    const resp = await fetch(`http://localhost:${restPort}/api/perception/enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, display_name: displayName, frames_b64: frames }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      progress.textContent = `✓ Enrolled as "${displayName}" (${data.frames_used} frames)`;
+      setTimeout(enrollClose, 2000);
+    } else {
+      progress.textContent = `Error: ${data.error}`;
+    }
+  } catch (e) {
+    progress.textContent = `Network error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    document.getElementById('enroll-btn').classList.remove('capturing');
+  }
+}
 </script>
+
+<!-- Face enrollment dialog -->
+<div id="enroll-dialog" onclick="if(event.target===this)enrollClose()">
+  <div id="enroll-dialog-box">
+    <h3>👤 Enroll Your Face</h3>
+    <p>AURA will capture 10 frames to learn your face. Look at the camera and stay still.</p>
+    <input id="enroll-name-input" type="text" placeholder="Display name (e.g. Alex)" />
+    <input id="enroll-id-input"   type="text" placeholder="User ID (optional, auto-generated)" />
+    <div id="enroll-progress"></div>
+    <div id="enroll-dialog-actions">
+      <button id="enroll-cancel-btn"  onclick="enrollClose()">Cancel</button>
+      <button id="enroll-confirm-btn" onclick="enrollConfirm()">Enroll</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

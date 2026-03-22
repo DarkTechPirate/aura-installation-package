@@ -1,8 +1,11 @@
 /**
  * WorkflowLoader — file-based workflow definitions (OpenClaw plugin-discovery parity).
  *
- * Loads ~/.aura/workflows/*.yaml at startup and hot-reloads on change.
+ * Loads ~/.aura/intents/*.yaml at startup and hot-reloads on change.
  * File-loaded workflows override built-in switch/case definitions (same intent name).
+ *
+ * NOTE: ~/.aura/workflows/ is a SEPARATE directory owned by the workflow_automation_v2
+ * skill (user-defined Zapier-style automations). Do not mix the two.
  *
  * YAML schema:
  *   intent, description, parallel, allowTools, requiresApproval, failFast,

@@ -371,7 +371,7 @@ export class AgentOrchestrator {
           system, messages,
           tools:      allTools.length > 0 ? allTools : undefined,
           max_tokens: 2048,
-        });
+        }, 'agent');
 
         if (!response.tool_calls || response.tool_calls.length === 0) {
           run.status = 'done'; run.result = response.text; run.done_at = Date.now();

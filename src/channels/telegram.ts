@@ -72,7 +72,8 @@ export class TelegramAdapter implements ChannelAdapter {
       } catch (err) {
         const isNetworkError = !(err instanceof Error && err.message.startsWith('Telegram '));
         // getUpdates has its own retry loop — don't double-retry it here
-        if (!isNetworkError || attempt === MAX_TRIES || method === 'getUpdates') throw err;
+        // sendChatAction is cosmetic (typing indicator) — fail fast, never retry
+        if (!isNetworkError || attempt === MAX_TRIES || method === 'getUpdates' || method === 'sendChatAction') throw err;
         const delay = attempt * 2000; // 2s, 4s
         console.warn(`[Telegram] ${method} failed (attempt ${attempt}/${MAX_TRIES}), retrying in ${delay}ms…`);
         await new Promise(r => setTimeout(r, delay));

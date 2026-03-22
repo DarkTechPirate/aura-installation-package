@@ -20,6 +20,7 @@ import { ChannelManager } from './channels/manager.js';
 import { CanvasRenderer } from './canvas/renderer.js';
 import { CanvasServer } from './canvas/server.js';
 import { RestAPI, type HeartbeatLogEntry, type TokenStats, type TokenCallEntry } from './api/rest.js';
+import { AnthropicProxy } from './llm/anthropic_proxy.js';
 import { SchedulerEngine } from './scheduler/engine.js';
 import { HeartbeatRunner } from './scheduler/heartbeat.js';
 import { ProactiveTools }  from './scheduler/proactive.js';
@@ -97,7 +98,11 @@ function purgeExpiredSessionSkills(): void {
   const now = Date.now();
   for (const [k, v] of sessionSkillCache) {
     const ttl = isStableSession(k) ? SESSION_SKILL_TTL_STABLE_MS : SESSION_SKILL_TTL_MS;
-    if (now - v.lastUsed > ttl) { sessionSkillCache.delete(k); sessionMetaCache.delete(k); }
+    if (now - v.lastUsed > ttl) sessionSkillCache.delete(k);
+  }
+  for (const [k, v] of sessionMetaCache) {
+    const ttl = isStableSession(k) ? SESSION_SKILL_TTL_STABLE_MS : SESSION_SKILL_TTL_MS;
+    if (now - v.lastUsed > ttl) sessionMetaCache.delete(k);
   }
 }
 
@@ -106,7 +111,8 @@ function purgeExpiredSessionSkills(): void {
 // the message contains relevant keywords — reducing token cost on simple requests.
 // Groups accumulate per session (same pattern as skills).
 
-const sessionMetaCache = new Map<string, Set<string>>();
+interface SessionMetaEntry { groups: Set<string>; lastUsed: number; }
+const sessionMetaCache = new Map<string, SessionMetaEntry>();
 
 const META_PATTERNS: Array<{ re: RegExp; group: string }> = [
   { re: /\b(canvas|draw|whiteboard|diagram|show on (screen|canvas)|display (on )?canvas)\b/i,                          group: 'canvas'      },
@@ -140,8 +146,10 @@ async function smartLoadMetaTools(
   pulseDef:        ToolDefinition,
 ): Promise<ToolDefinition[]> {
   // Accumulate triggered groups for this session
-  if (!sessionMetaCache.has(sessionId)) sessionMetaCache.set(sessionId, new Set());
-  const groups = sessionMetaCache.get(sessionId)!;
+  if (!sessionMetaCache.has(sessionId)) sessionMetaCache.set(sessionId, { groups: new Set(), lastUsed: Date.now() });
+  const entry = sessionMetaCache.get(sessionId)!;
+  entry.lastUsed = Date.now();
+  const groups = entry.groups;
 
   // 1. Regex fast-path (catches exact keywords instantly)
   for (const { re, group } of META_PATTERNS) {
@@ -402,6 +410,7 @@ async function main(): Promise<void> {
   // Channel adapters are loaded dynamically — only enabled channels are imported.
   // The webchat hook injects gateway metadata before init() is called.
   const channels = new ChannelManager();
+
   await channels.init(config, {
     webchat: (adapter) => {
       // Reason: WebChatAdapter.setMeta() must be called before init() to inject
@@ -470,42 +479,42 @@ async function main(): Promise<void> {
     },
   ];
 
-  // Memory tool definitions — allow the agent to explicitly save facts
+  // Memory tool definitions
   const memoryToolDefs = [
     {
       name: 'remember_about_user',
-      description: 'Save a specific fact or note about the user to long-term memory. Use this when the user tells you something worth remembering permanently.',
+      description: 'Save a fact about the user to long-term memory.',
       parameters: {
         type: 'object',
         properties: {
-          fact: { type: 'string', description: 'The fact to remember about the user' },
+          fact: { type: 'string', description: 'Fact to remember' },
         },
         required: ['fact'],
       },
     },
     {
       name: 'remember_about_self',
-      description: 'Save something you learned about yourself — a correction, a preference the user expressed, or a lesson from this conversation.',
+      description: 'Save a correction or lesson about yourself to long-term memory.',
       parameters: {
         type: 'object',
         properties: {
-          note: { type: 'string', description: 'The self-knowledge note to save' },
+          note: { type: 'string', description: 'Note to save' },
         },
         required: ['note'],
       },
     },
     {
       name: 'consolidate_memory',
-      description: 'Deduplicate and reorganise the long-term memory profiles, merging redundant facts.',
+      description: 'Deduplicate and reorganise long-term memory profiles.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
     {
       name: 'search_memory',
-      description: 'Search past conversations using a custom query. Use this when the user asks about something discussed before and the automatic context did not surface it.',
+      description: 'Search past conversations by query when automatic context missed it.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'The topic or phrase to search for in past conversations' },
+          query: { type: 'string', description: 'Topic or phrase to search' },
         },
         required: ['query'],
       },
@@ -592,10 +601,17 @@ async function main(): Promise<void> {
           const { toolDefs: skillToolDefs, unloadedSkillNames } = await smartLoadSkills(
             agent.skills ?? [], pending.originalText, event.session_id, skills, memory,
           );
-          const rawToolsR = [
-            ...skillToolDefs, selfWriteTool.toolDef, ...orchestrator.getToolDefs(),
-            ...canvasToolDefs, ...memoryToolDefs, ...proactiveTools.getToolDefs(),
-          ];
+          const pulseToolR: ToolDefinition = {
+            name: 'pulse_status',
+            description: 'Pulse trade monitor status — last check time, recent alerts, per-monitor stats.',
+            parameters: { type: 'object', properties: {} },
+          };
+          const metaToolDefsR = await smartLoadMetaTools(
+            pending.originalText, event.session_id, memory,
+            selfWriteTool.toolDef, orchestrator.getToolDefs(),
+            canvasToolDefs, memoryToolDefs, proactiveTools.getToolDefs(), pulseToolR,
+          );
+          const rawToolsR = [...skillToolDefs, ...metaToolDefsR];
           const seenR = new Set<string>();
           const allToolsR = rawToolsR.filter(t => { if (seenR.has(t.name)) return false; seenR.add(t.name); return true; });
           const ctxR  = buildSkillContext(event, agent.memory_ns);
@@ -612,7 +628,7 @@ async function main(): Promise<void> {
             audit.llmCall(event.node_id, agent.memory_ns, agent.llm_tier, agent.llm_tier);
             let respR;
             try {
-              respR = await llm.complete(agent.llm_tier, { system: paramsR.system, messages: messagesR, tools: paramsR.tools, max_tokens: paramsR.max_tokens });
+              respR = await llm.complete(agent.llm_tier, { system: paramsR.system, messages: messagesR, tools: paramsR.tools, max_tokens: paramsR.max_tokens }, 'user', event.session_id);
             } catch (err) {
               console.error('[Approval] LLM error:', err);
               await sendReply(event.node_id, 'Error resuming after approval. Try again.', agent.voice_id);
@@ -685,7 +701,7 @@ async function main(): Promise<void> {
     );
     const pulseStatusToolDef: ToolDefinition = {
       name: 'pulse_status',
-      description: 'Get the current status of the Pulse trade monitor — last check time, recent alerts, and per-monitor stats. Use this when the user asks about trade monitoring, pulse, or recent alerts.',
+      description: 'Pulse trade monitor status — last check time, recent alerts, per-monitor stats.',
       parameters: { type: 'object', properties: {} },
     };
 
@@ -779,7 +795,7 @@ async function main(): Promise<void> {
             messages:   augmentedMessages,
             tools:      undefined,
             max_tokens: params.max_tokens,
-          });
+          }, 'user', event.session_id);
         } catch (err) {
           console.error('[Workflow] LLM error:', err);
           await sendReply(event.node_id, 'Sorry, hit an error on that. Try again.', agent.voice_id);
@@ -821,7 +837,7 @@ async function main(): Promise<void> {
               messages:   compactMessages,
               tools:      undefined,
               max_tokens: params.max_tokens,
-            });
+            }, 'user', event.session_id);
             visibleText = stripThink(retryResp.text);
             tokenStats.total_input  += retryResp.usage.input_tokens;
             tokenStats.total_output += retryResp.usage.output_tokens;
@@ -862,7 +878,7 @@ async function main(): Promise<void> {
             messages:   augmentedMessages,
             tools:      undefined,
             max_tokens: 512,
-          });
+          }, 'user', event.session_id);
         } catch (err) {
           console.error('[Workflow] Approval preview LLM error:', err);
           await sendReply(event.node_id, 'Could not generate preview. Try again.', agent.voice_id);
@@ -910,7 +926,7 @@ async function main(): Promise<void> {
           messages,
           tools:      params.tools,
           max_tokens: params.max_tokens,
-        });
+        }, 'user', event.session_id);
       } catch (err) {
         console.error('[Loop] LLM error:', err);
         await sendReply(event.node_id, `Sorry, I encountered an error. Please try again.`, agent.voice_id);
@@ -1178,6 +1194,9 @@ async function main(): Promise<void> {
   const scheduler = new SchedulerEngine(config, memory, channels, triggerHeartbeat, workflowFireFn, pulseRunner);
   scheduler.start();
 
+  // ── Anthropic-compatible proxy (AURA acts as LLM for Claude Code) ────────
+  const anthropicProxy = new AnthropicProxy(llm, agents);
+
   // ── REST API ───────────────────────────────────────────────────────────────
   const restApi = new RestAPI({
     config, anpServer, agentRegistry,
@@ -1186,6 +1205,7 @@ async function main(): Promise<void> {
     heartbeatLog, startTime: START_TIME,
     orchestrator, tokenStats,
     getPulseStatus: () => pulseRunner.getStatus(),
+    anthropicProxy,
   });
   await restApi.start();
 

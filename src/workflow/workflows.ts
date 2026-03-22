@@ -131,6 +131,26 @@ export function resolveWorkflow(match: WorkflowMatch): WorkflowDef | null {
           'Flag anything that needs attention — trades near SL, large drawdown, or high margin usage.',
       };
 
+    // ── Forex: single instrument deep analysis ───────────────────────────────
+
+    case 'instrument_analysis': {
+      if (!match.instrument) return null;
+      return {
+        intent:     'instrument_analysis',
+        parallel:   false,
+        allowTools: false,
+        steps: [
+          { toolName: 'forex_analysis', args: { instrument: match.instrument, multi_tf: true } },
+        ],
+        llmInstruction:
+          `Deep technical analysis for ${match.instrument}. ` +
+          'Cover: trend direction across timeframes, key S/R levels (with actual price values), ' +
+          'momentum (RSI value + MACD state), volatility (ATR, Bollinger band width), ' +
+          'and a clear verdict — bullish/bearish/neutral with specific entry zone, SL, and TP. ' +
+          'Use actual numbers from the data. No filler. Max 250 words.',
+      };
+    }
+
     // ── Forex: single-step narrate ───────────────────────────────────────────
 
     case 'pre_trade_check': {
