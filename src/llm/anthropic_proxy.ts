@@ -73,6 +73,7 @@ export class AnthropicProxy {
         content.push({ type: 'text', text: response.text });
       }
       for (const tc of response.tool_calls ?? []) {
+        logger.info(`Proxy tool_call: ${tc.name} args=${JSON.stringify(tc.args).slice(0, 200)}`);
         content.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args });
       }
       if (content.length === 0) {
@@ -213,16 +214,29 @@ async function sendSSE(
 
   for (let i = 0; i < content.length; i++) {
     const block = content[i];
-    send('content_block_start', { type: 'content_block_start', index: i, content_block: block });
 
-    if (block.type === 'text' && block.text) {
-      // Emit text in ~100-char chunks so Claude Code sees a progressive stream
-      const chunks = chunkString(block.text, 100);
-      for (const chunk of chunks) {
-        send('content_block_delta', {
-          type: 'content_block_delta', index: i,
-          delta: { type: 'text_delta', text: chunk },
-        });
+    if (block.type === 'tool_use') {
+      // Per Anthropic SSE spec: content_block_start must have empty input {},
+      // then tool input arrives via input_json_delta — not in the start event.
+      send('content_block_start', {
+        type: 'content_block_start', index: i,
+        content_block: { type: 'tool_use', id: block.id, name: block.name, input: {} },
+      });
+      send('content_block_delta', {
+        type: 'content_block_delta', index: i,
+        delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input ?? {}) },
+      });
+    } else {
+      send('content_block_start', { type: 'content_block_start', index: i, content_block: block });
+      if (block.type === 'text' && block.text) {
+        // Emit text in ~100-char chunks so Claude Code sees a progressive stream
+        const chunks = chunkString(block.text, 100);
+        for (const chunk of chunks) {
+          send('content_block_delta', {
+            type: 'content_block_delta', index: i,
+            delta: { type: 'text_delta', text: chunk },
+          });
+        }
       }
     }
 
