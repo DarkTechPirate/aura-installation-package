@@ -15,6 +15,7 @@ interface OllamaResponse {
 
 export class OllamaAdapter implements LLMAdapter {
   private baseUrl: string;
+  private supportsTools: boolean | null = null;
   readonly provider = 'ollama';
   readonly model: string;
 
@@ -24,6 +25,40 @@ export class OllamaAdapter implements LLMAdapter {
   }
 
   async complete(params: LLMParams): Promise<LLMResponse> {
+    const stripImages = (b: Record<string, unknown>): Record<string, unknown> => ({
+      ...b,
+      messages: (b.messages as Record<string, unknown>[]).map(m => {
+        const { images: _images, ...rest } = m as Record<string, unknown> & { images?: unknown };
+        return rest;
+      }),
+    });
+
+    const stripTools = (b: Record<string, unknown>): Record<string, unknown> => {
+      const { tools: _tools, ...restBody } = b as Record<string, unknown> & { tools?: unknown };
+      return {
+        ...restBody,
+        messages: (b.messages as Record<string, unknown>[])
+          .filter(m => m.role !== 'tool')
+          .map(m => {
+            const { tool_calls: _toolCalls, tool_call_id: _toolCallId, ...rest } = m as Record<string, unknown> & {
+              tool_calls?: unknown;
+              tool_call_id?: unknown;
+            };
+            return rest;
+          }),
+      };
+    };
+
+    const isVisionUnsupported = (errText: string): boolean => {
+      const lower = errText.toLowerCase();
+      return lower.includes('image_url is not supported') || lower.includes('does not support vision');
+    };
+
+    const isToolsUnsupported = (errText: string): boolean => {
+      const lower = errText.toLowerCase();
+      return lower.includes('does not support tools') || lower.includes('tool calling is not supported') || lower.includes('unsupported parameter: tools');
+    };
+
     const messages = [
       { role: 'system', content: params.system },
       ...params.messages.map(m => {
@@ -58,7 +93,7 @@ export class OllamaAdapter implements LLMAdapter {
       },
     };
 
-    if (params.tools && params.tools.length > 0) {
+    if (params.tools && params.tools.length > 0 && this.supportsTools !== false) {
       body.tools = params.tools.map(t => ({
         type: 'function',
         function: {
@@ -81,19 +116,34 @@ export class OllamaAdapter implements LLMAdapter {
       }
     };
 
-    let response = await doFetch(body);
+    let requestBody = this.supportsTools === false ? stripTools(body) : body;
+    let response = await doFetch(requestBody);
 
     if (!response.ok) {
-      const errText = await response.text();
-      // Model doesn't support vision — strip images and retry once
-      if (errText.includes('image_url is not supported') || errText.includes('does not support vision')) {
+      let errText = await response.text();
+
+      // Model doesn't support vision — strip images and retry once.
+      if (isVisionUnsupported(errText)) {
         console.warn('[Ollama] Model does not support vision — retrying without image');
-        const bodyNoImg = { ...body, messages: (body.messages as Record<string, unknown>[]).map(m => { const { images: _, ...rest } = m as Record<string, unknown> & { images?: unknown }; return rest; }) };
-        response = await doFetch(bodyNoImg);
-        if (!response.ok) throw new Error(`Ollama error ${response.status}: ${await response.text()}`);
-      } else {
-        throw new Error(`Ollama error ${response.status}: ${errText}`);
+        requestBody = stripImages(requestBody);
+        response = await doFetch(requestBody);
+        if (!response.ok) {
+          errText = await response.text();
+        }
       }
+
+      // Some local models (e.g. tinyllama) reject tool payloads entirely.
+      if (!response.ok && isToolsUnsupported(errText)) {
+        console.warn('[Ollama] Model does not support tools — retrying without tools');
+        this.supportsTools = false;
+        requestBody = stripTools(requestBody);
+        response = await doFetch(requestBody);
+        if (!response.ok) throw new Error(`Ollama error ${response.status}: ${await response.text()}`);
+      }
+
+      if (!response.ok) throw new Error(`Ollama error ${response.status}: ${errText}`);
+    } else if (params.tools && params.tools.length > 0) {
+      this.supportsTools = true;
     }
 
     let data: OllamaResponse;
